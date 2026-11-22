@@ -10,12 +10,12 @@ From this directory run `python -m http.server 8765 --bind 127.0.0.1`, then open
 
 - One file at a time: STL, OBJ, 3MF, STEP/STP.
 - Drag with the left or right button to orbit. Left click selects a part. Fusion shortcuts are also available: middle drag to pan, Shift + middle drag to orbit, wheel to zoom, and F to fit. Orientation buttons offer preset views.
-- **Explode into parts** preserves source mesh/body boundaries and splits each into triangle shells connected through shared edges. Coordinate welding uses a small, scale-dependent tolerance. This is geometric connectivity, not semantic recognition. Fused solids may remain one part; vertex-only contacts remain separate. Existing CAD body boundaries are retained.
+- **Explode into parts** preserves source mesh and body boundaries, then splits disconnected triangle shells. For a single connected shell, it also checks for a neck and gaps beside the torso and between the legs. If those landmarks are clear, it follows the surface to suggest a head, torso, two arms, and two legs. This works best with roughly upright humanoids wearing distinct silhouettes and supports single shells up to 180,000 triangles. Joined limbs, accessories, and unusual poses can prevent a match.
 - Slider spreads parts along directions from the assembly center. Reassemble restores their exact original coordinates. Select parts on the canvas or in the list; toggle visibility independently.
-- Export STL, OBJ, 3MF, or faceted STEP. **Downloads use original assembled coordinates, include hidden parts, and ignore the viewing explosion.** STEP export generates planar triangle BREP faces; it does not reconstruct smooth surfaces, feature history, or original STEP topology. STEP requires closed, consistently oriented shells and is limited to 60,000 triangles. Other exports are triangle geometry only. Material/texture metadata and 3MF slicer settings are not round-tripped.
+- Export STL, OBJ, 3MF, or faceted STEP. **Downloads use original assembled coordinates, include hidden parts, and ignore the viewing explosion.** Suggested figurine regions are open surface patches for inspection. Exports use the original unsplit figurine mesh. STEP export generates planar triangle BREP faces and requires closed, consistently oriented shells with at most 60,000 triangles. Other exports are triangle geometry only. Material/texture metadata and 3MF slicer settings are not round-tripped.
 - STL and OBJ have no reliable unit metadata; dimensions are assumed millimeters. 3MF/STEP imports normalize supported units to millimeters.
 - Limits: 80 MB file, 1.5 million triangles, 2,500 detected parts. Large geometry imports/exports may briefly stall the browser; STEP import and connectivity analysis use workers. 3MF ZIP metadata is checked against a 200 MB uncompressed limit before parsing.
-- The sample pump has seven source bodies. It is demonstration geometry, not a manufacturing design.
+- The sample pump has seven source bodies. The sample astronaut starts as one connected surface with no part labels and is analyzed by the same worker as uploaded models.
 
 ## Hosting
 
@@ -27,10 +27,6 @@ Copy this directory to a folder such as `partlab/` in a GitHub Pages repository.
 - fflate 0.8.2, MIT: https://github.com/101arrowz/fflate — 3MF ZIP export.
 - occt-import-js 0.0.23: https://github.com/kovacsv/occt-import-js — browser STEP tessellation, based on Open CASCADE. See upstream licensing for OCCT and this wrapper. Loaded only for STEP imports.
 - Fusion navigation reference: https://help.autodesk.com/cloudhelp/ENU/Fusion-GetStarted/files/GUID-F0491540-0324-470A-B651-2238D0EFAC30.htm
-
-## Next interview decision
-
-Determine whether "logical parts" should mean disconnected bodies only, or whether fused objects should be segmented into suggested mechanical features. The latter needs a separate algorithm and user review of proposed cuts; this prototype makes no claim to perform it.
 
 ## Validation — November 22, 2026
 
