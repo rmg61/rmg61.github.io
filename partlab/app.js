@@ -3,7 +3,7 @@ import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {zipSync,strToU8} from 'fflate';
-import {bounds,binarySTL,objText,meshXML,stepText} from './geometry.js';
+import {bounds,binarySTL,objText,meshXML,stepText} from './geometry.js?v=0.1.2';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
