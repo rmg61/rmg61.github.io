@@ -9,7 +9,7 @@ From this directory run `python -m http.server 8765 --bind 127.0.0.1`, then open
 ## Prototype behavior
 
 - One file at a time: STL, OBJ, 3MF, STEP/STP.
-- Fusion mouse scheme: middle button pan, Shift + middle button orbit, wheel zoom, double middle button or F fit. Orientation buttons offer preset views.
+- Drag with the left or right button to orbit. Left click selects a part. Fusion shortcuts are also available: middle drag to pan, Shift + middle drag to orbit, wheel to zoom, and F to fit. Orientation buttons offer preset views.
 - **Explode into parts** preserves source mesh/body boundaries and splits each into triangle shells connected through shared edges. Coordinate welding uses a small, scale-dependent tolerance. This is geometric connectivity, not semantic recognition. Fused solids may remain one part; vertex-only contacts remain separate. Existing CAD body boundaries are retained.
 - Slider spreads parts along directions from the assembly center. Reassemble restores their exact original coordinates. Select parts on the canvas or in the list; toggle visibility independently.
 - Export STL, OBJ, 3MF, or faceted STEP. **Downloads use original assembled coordinates, include hidden parts, and ignore the viewing explosion.** STEP export generates planar triangle BREP faces; it does not reconstruct smooth surfaces, feature history, or original STEP topology. STEP requires closed, consistently oriented shells and is limited to 60,000 triangles. Other exports are triangle geometry only. Material/texture metadata and 3MF slicer settings are not round-tripped.

@@ -12,7 +12,8 @@ camera.up.set(0,0,1);camera.position.set(140,-170,125);
 let renderer;
 try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});}catch(e){$('notice').textContent='WebGL is unavailable. Enable hardware acceleration in your browser and reload.';throw e;}
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setClearColor(0,0);viewport.prepend(renderer.domElement);
-renderer.domElement.setAttribute('aria-label','Interactive 3D model. Middle mouse to pan, Shift and middle mouse to orbit, wheel to zoom.');renderer.domElement.tabIndex=0;
+renderer.domElement.setAttribute('aria-label', 'Interactive 3D model. Drag with the left or right mouse button to orbit. Middle mouse drag pans, Shift plus middle mouse drag orbits, and the wheel zooms. Left click selects a part.');
+renderer.domElement.tabIndex = 0;
 scene.add(new THREE.HemisphereLight(0xd8ecff,0x53605b,2.5));
 const key=new THREE.DirectionalLight(0xffffff,3);key.position.set(70,-70,160);scene.add(key);
 const fill=new THREE.DirectionalLight(0xa6caff,1.7);fill.position.set(-100,80,60);scene.add(fill);
@@ -78,11 +79,78 @@ async function exportModel(){if(busy||!parts.length)return;setBusy(true,'Prepari
     const blob=new Blob([payload],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(modelName.replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]/gi,'_')||'model')+'.'+format;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);notice(format==='step'?'Faceted STEP downloaded. Triangle faces are preserved; curved CAD surfaces and feature history are not reconstructed.':'Model downloaded in its original assembled coordinates. Hidden parts are included; spacing is a viewing aid.');
   }catch(e){notice('Export failed: '+e.message,true);}finally{setBusy(false);}}
 
-// Fusion navigation: MMB pan; Shift + MMB orbit; wheel zoom; double MMB fit.
-const canvas=renderer.domElement;
-canvas.addEventListener('pointerdown',e=>{if(e.button!==1&&e.button!==0)return;canvas.focus();if(e.button===1)e.preventDefault();canvas.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,button:e.button,orbit:e.shiftKey};});
-canvas.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;if(drag.button!==1)return;const offset=camera.position.clone().sub(target),radius=offset.length();if(drag.orbit){const theta=Math.atan2(offset.y,offset.x)-dx*.007,phi=THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(offset.z/radius,-1,1))-dy*.007,.003,Math.PI-.003);camera.position.set(target.x+radius*Math.sin(phi)*Math.cos(theta),target.y+radius*Math.sin(phi)*Math.sin(theta),target.z+radius*Math.cos(phi));}else{const scale=2*radius*Math.tan(camera.fov*Math.PI/360)/canvas.clientHeight,right=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0),up=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,1),delta=right.multiplyScalar(-dx*scale).addScaledVector(up,dy*scale);camera.position.add(delta);target.add(delta);}camera.lookAt(target);});
-canvas.addEventListener('pointerup',e=>{if(drag?.button===0&&Math.hypot(e.clientX-drag.startX,e.clientY-drag.startY)<5&&isDiscovered){const rect=canvas.getBoundingClientRect();pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);raycaster.setFromCamera(pointer,camera);const hit=raycaster.intersectObjects(parts.filter(p=>p.mesh.visible).map(p=>p.mesh));selectPart(hit[0]?.object.userData.partIndex??-1);}drag=null;});canvas.addEventListener('pointercancel',()=>drag=null);canvas.addEventListener('lostpointercapture',()=>drag=null);
+// A short left click selects a part. A drag can start anywhere in the canvas.
+const canvas = renderer.domElement;
+const orbitDragThreshold = 5;
+
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+canvas.addEventListener('pointerdown', event => {
+  if (drag || ![0, 1, 2].includes(event.button)) return;
+  if (event.button !== 0) event.preventDefault();
+  canvas.focus({ preventScroll: true });
+  canvas.setPointerCapture(event.pointerId);
+  drag = {
+    pointerId: event.pointerId,
+    button: event.button,
+    orbit: event.button !== 1 || event.shiftKey,
+    moved: false,
+    x: event.clientX,
+    y: event.clientY
+  };
+});
+
+canvas.addEventListener('pointermove', event => {
+  if (drag?.pointerId !== event.pointerId) return;
+  const dx = event.clientX - drag.x;
+  const dy = event.clientY - drag.y;
+  if (drag.button === 0 && !drag.moved && Math.hypot(dx, dy) < orbitDragThreshold) return;
+  if (dx === 0 && dy === 0) return;
+
+  drag.moved = true;
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  const offset = camera.position.clone().sub(target);
+  const radius = offset.length();
+  if (drag.orbit) {
+    const theta = Math.atan2(offset.y, offset.x) - dx * .007;
+    const initialPhi = Math.acos(THREE.MathUtils.clamp(offset.z / radius, -1, 1));
+    const phi = THREE.MathUtils.clamp(initialPhi - dy * .007, .003, Math.PI - .003);
+    camera.position.set(
+      target.x + radius * Math.sin(phi) * Math.cos(theta),
+      target.y + radius * Math.sin(phi) * Math.sin(theta),
+      target.z + radius * Math.cos(phi)
+    );
+  } else {
+    const scale = 2 * radius * Math.tan(camera.fov * Math.PI / 360) / canvas.clientHeight;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    const delta = right.multiplyScalar(-dx * scale).addScaledVector(up, dy * scale);
+    camera.position.add(delta);
+    target.add(delta);
+  }
+  camera.lookAt(target);
+});
+
+canvas.addEventListener('pointerup', event => {
+  if (drag?.pointerId !== event.pointerId) return;
+  const movement = Math.hypot(event.clientX - drag.x, event.clientY - drag.y);
+  const shouldSelect = drag.button === 0 && !drag.moved && movement < orbitDragThreshold;
+  drag = null;
+  if (!shouldSelect || !isDiscovered) return;
+
+  const rect = canvas.getBoundingClientRect();
+  pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
+  raycaster.setFromCamera(pointer, camera);
+  const visibleMeshes = parts.filter(part => part.mesh.visible).map(part => part.mesh);
+  const [hit] = raycaster.intersectObjects(visibleMeshes);
+  selectPart(hit?.object.userData.partIndex ?? -1);
+});
+
+function cancelDrag(event) {
+  if (drag?.pointerId === event.pointerId) drag = null;
+}
+canvas.addEventListener('pointercancel', cancelDrag);
+canvas.addEventListener('lostpointercapture', cancelDrag);
 canvas.addEventListener('auxclick',e=>e.preventDefault());canvas.addEventListener('dblclick',e=>{if(e.button===1)fitView();});canvas.addEventListener('wheel',e=>{e.preventDefault();const offset=camera.position.clone().sub(target),distance=THREE.MathUtils.clamp(offset.length()*Math.exp(Math.max(-500,Math.min(500,e.deltaY))*.001),zoomMin,zoomMax);camera.position.copy(target).add(offset.setLength(distance));camera.lookAt(target);},{passive:false});
 new ResizeObserver(()=>{camera.aspect=Math.max(1,viewport.clientWidth)/Math.max(1,viewport.clientHeight);camera.updateProjectionMatrix();renderer.setSize(viewport.clientWidth,viewport.clientHeight);}).observe(viewport);
 renderer.setAnimationLoop(()=>{camera.lookAt(target);renderer.render(scene,camera);});
