@@ -1,0 +1,16 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {splitConnected,binarySTL,objText,meshXML,stepText,bounds} from '../geometry.js';
+const tetra=new Float32Array([0,0,0,0,1,0,1,0,0, 0,0,0,1,0,0,0,0,1, 0,0,0,0,0,1,0,1,0, 1,0,0,0,1,0,0,0,1]);
+const translated=(a,x)=>a.map((v,i)=>i%3===0?v+x:v);
+test('STL-style unindexed shared edges weld into a single shell',()=>{assert.equal(splitConnected(tetra).length,1);});
+test('two separate closed shells split without losing triangles',()=>{const a=new Float32Array(72);a.set(tetra);a.set(translated(tetra,10),36);const parts=splitConnected(a);assert.equal(parts.length,2);assert.equal(parts.reduce((n,p)=>n+p.length,0),a.length);});
+test('vertex contact alone does not merge logical shells',()=>{const a=new Float32Array([0,0,0,1,0,0,0,1,0,0,0,0,-1,0,0,0,-1,0]);assert.equal(splitConnected(a).length,2);});
+test('shared-edge contact does connect triangles',()=>{assert.equal(splitConnected(new Float32Array([0,0,0,1,0,0,0,1,0,1,0,0,0,0,0,0,0,1])).length,1);});
+test('invalid coordinates and incomplete triangles are rejected',()=>{assert.throws(()=>splitConnected(new Float32Array([0,0,0])));const p=tetra.slice();p[0]=NaN;assert.throws(()=>splitConnected(p));});
+test('binary STL retains triangle positions and count',()=>{const output=binarySTL([{positions:tetra}]);assert.equal(output.byteLength,84+4*50);const view=new DataView(output);assert.equal(view.getUint32(80,true),4);assert.equal(view.getFloat32(84+12+4*4,true),1);});
+test('OBJ indices for second part are offset',()=>{const s=objText([{positions:tetra},{positions:tetra}]);assert.match(s,/o Part_2/);assert.match(s,/f 13 14 15/);});
+test('3MF uses one object per part and millimeter units',()=>{const s=meshXML([{positions:tetra},{positions:tetra}]);assert.match(s,/unit="millimeter"/);assert.equal((s.match(/<object /g)||[]).length,2);assert.equal((s.match(/<triangle /g)||[]).length,8);});
+test('STEP emits closed faceted BREP and valid references',()=>{const s=stepText([{positions:tetra}]);assert.match(s,/FACETED_BREP\(/);assert.match(s,/CLOSED_SHELL/);const entities=new Set([...s.matchAll(/^#(\d+)=/gm)].map(m=>m[1]));for(const m of s.matchAll(/#(\d+)/g))assert.ok(entities.has(m[1]));assert.ok(s.endsWith('END-ISO-10303-21;'));});
+test('STEP refuses open and inconsistently oriented meshes',()=>{assert.throws(()=>stepText([{positions:tetra.slice(0,27)}]),/closed/);const p=tetra.slice();p.set(tetra.slice(6,9),3);p.set(tetra.slice(3,6),6);assert.throws(()=>stepText([{positions:p}]),/closed/);});
+test('bounds preserve original coordinates for assembled export',()=>{assert.deepEqual(bounds(translated(tetra,10)).min,[10,0,0]);});
