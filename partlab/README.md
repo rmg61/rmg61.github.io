@@ -31,3 +31,8 @@ Copy this directory to a folder such as `partlab/` in a GitHub Pages repository.
 ## Next interview decision
 
 Determine whether "logical parts" should mean disconnected bodies only, or whether fused objects should be segmented into suggested mechanical features. The latter needs a separate algorithm and user review of proposed cuts; this prototype makes no claim to perform it.
+
+## Validation — November 22, 2026
+
+Thirteen Node geometry/export tests passed. Live browser checks loaded the sample and found seven parts; an exported STL was reopened and still yielded seven shells. OBJ, 3MF, and faceted STEP fixtures generated from those same positions all loaded with 516 triangles and matching bounds; 3MF and STEP discovery found seven pieces. The STEP round trip uses the actual browser OCCT parser. This does not validate every vendor's format extensions or guarantee repair of arbitrary meshes.
+
