@@ -4,7 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
-import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.0';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.1';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -328,7 +328,7 @@ async function makePrint3MF() {
   const scale = printScale();
   const fileParts = parts.map(({ name, positions, indices, slot }) => ({ name, positions, indices, slot }));
   const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
-  return workerJob('print-worker.js?v=0.3.0', {
+  return workerJob('print-worker.js?v=0.3.1', {
     name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
     scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset)
   });
@@ -353,8 +353,7 @@ async function exportModel() {
       payload = bytes;
       type = 'model/3mf';
       const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
-      const capacity = filaments.length > 32 ? ' Slots above 32 use standard 3MF colors only.' : '';
-      message = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}${capacity}`;
+      message = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}`;
     }
     const url = URL.createObjectURL(new Blob([payload], { type }));
     const link = document.createElement('a');
@@ -452,22 +451,6 @@ $('file').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.f
 $('isolate-part').onclick = () => {
   parts.forEach((part, index) => { part.mesh.visible = index === selected; });
   renderPartList();
-};
-$('add-filament').onclick = () => {
-  filaments.push(defaultFilaments[filaments.length % defaultFilaments.length]);
-  renderFilaments();
-  renderPartList();
-  $('filaments').lastElementChild.firstElementChild.focus();
-};
-$('slot-each').onclick = () => {
-  if (!parts.length) return;
-  filaments = parts.map(part => '#' + new THREE.Color(part.color).getHexString());
-  parts.forEach((part, index) => { part.slot = index; });
-  showPrintColors = true;
-  renderFilaments();
-  renderPartList();
-  updatePrintColors();
-  notice(`${filaments.length} separate filament slots assigned. Edit each color in Print setup.`);
 };
 $('paint-view').onclick = () => { showPrintColors = !showPrintColors; updatePrintColors(); };
 $('undo-fin').onclick = removeLastFin;

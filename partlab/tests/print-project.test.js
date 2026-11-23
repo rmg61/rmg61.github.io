@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPrintProject, makeSupportFin, orcaPaintCode } from '../print-project.js';
+import { buildPrintProject, defaultFilaments, makeSupportFin, orcaPaintCode } from '../print-project.js';
 
 const faces = new Float32Array([
   0,0,0, 0,0,1, 0,1,0,
@@ -9,18 +9,29 @@ const faces = new Float32Array([
   0,0,1, 1,0,0, 0,1,0
 ]);
 
-test('color export joins fused patches into one indexed part and preserves a 25-slot palette', () => {
-  const filaments = Array.from({ length: 25 }, (_, i) => '#' + (i * 936487).toString(16).slice(-6).padStart(6, '0'));
+test('color export joins fused patches into one indexed part and preserves eight custom filament colors', () => {
+  const filaments = ['#1a2b3c', '#334455', '#887766', '#fedcba', '#aabbcc', '#0f3355', '#72bb40', '#e35f21'];
   const { files, warnings } = buildPrintProject({ name: 'Test', parts: [
     { name: 'Lower', positions: faces.slice(0, 18), slot: 0 },
-    { name: 'Upper', positions: faces.slice(18), slot: 24 }
+    { name: 'Upper', positions: faces.slice(18), slot: 7 }
   ], filaments, scale: 22, origin: [0, 0, 0], fused: true });
   const model = files['3D/3dmodel.model'];
   assert.deepEqual(warnings, { open: 0, irregular: 0, removed: 0 });
   assert.equal([...model.matchAll(/<vertex /g)].length, 4);
-  assert.equal([...model.matchAll(/<m:color /g)].length, 25);
-  assert.match(model, /p1="24" p2="24" p3="24" paint_color="7FC"/);
+  assert.deepEqual([...model.matchAll(/<m:color color="([^"]+)"/g)].map(match => match[1]), filaments.map(color => color.toUpperCase()));
+  assert.match(model, /p1="7" p2="7" p3="7" paint_color="5C"/);
   assert.deepEqual(JSON.parse(files['Metadata/project_settings.config']).filament_colour, filaments.map(color => color.toUpperCase()));
+});
+
+test('the print project rejects a ninth filament slot', () => {
+  assert.equal(defaultFilaments.length, 8);
+  const parts = [{ name: 'Model', positions: faces, slot: 0 }];
+  assert.throws(() => buildPrintProject({
+    name: 'Test', parts, filaments: [...defaultFilaments, '#000000'], scale: 1, origin: [0, 0, 0]
+  }), /at most 8 filament slots/);
+  assert.throws(() => buildPrintProject({
+    name: 'Test', parts: [{ ...parts[0], slot: 8 }], filaments: defaultFilaments, scale: 1, origin: [0, 0, 0]
+  }), /missing filament slot/);
 });
 
 test('geometry of a bed-mounted support fin is watertight and leaves the requested gap', () => {

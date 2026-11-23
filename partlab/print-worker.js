@@ -1,5 +1,5 @@
 import { zipSync, strToU8 } from 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js';
-import { buildPrintProject } from './print-project.js?v=0.3.0';
+import { buildPrintProject } from './print-project.js?v=0.3.1';
 
 self.onmessage = ({ data }) => {
   try {

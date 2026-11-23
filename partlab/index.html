@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PartLab — Model explorer</title>
-  <link rel="stylesheet" href="./style.css?v=0.3.0">
+  <link rel="stylesheet" href="./style.css?v=0.3.1">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","fflate":"https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"}}</script>
 </head>
 <body>
@@ -19,9 +19,8 @@
       <details class="print-card" id="print-setup" hidden>
         <summary>Print setup</summary>
         <label for="print-width">Largest model dimension (mm)</label><input id="print-width" type="number" min="1" max="5000" step="any" value="100">
-        <p>Set a filament slot for each part in the parts list.</p>
+        <p>Click any of the eight swatches to choose a color. Assign a filament in the Parts list. Parts can share a filament.</p>
         <div id="filaments" class="filament-palette"></div>
-        <div class="print-buttons"><button id="add-filament" class="secondary">+ Filament slot</button><button id="slot-each" class="secondary">One slot per part</button></div>
         <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
         <div class="fin-tools">
           <h2>Support fins</h2><p>Click an underside in the assembled view. Each fin uses the color of its contact region.</p>
@@ -48,6 +47,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.0"></script>
+  <script type="module" src="./app.js?v=0.3.1"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>

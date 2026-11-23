@@ -1,6 +1,8 @@
 export const coreNS = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 export const materialNS = 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02';
-export const defaultFilaments = ['#C9BDA4', '#648A58', '#9C553B', '#485666'];
+export const defaultFilaments = Object.freeze([
+  '#C9BDA4', '#648A58', '#9C553B', '#485666', '#E2B64C', '#8F75B4', '#4799AA', '#D97991'
+]);
 export function orcaPaintCode(slot) {
   const state = slot + 1;
   if (state === 1 || state === 2) return `${state * 4}`;
@@ -60,6 +62,7 @@ function indexedBody(parts, scale, origin) {
 }
 
 export function buildPrintProject({ name, parts, fins = [], filaments, scale, origin, fused }) {
+  if (filaments.length > defaultFilaments.length) throw new Error(`Use at most ${defaultFilaments.length} filament slots.`);
   if (!filaments.length || filaments.some(color => !/^#[0-9a-f]{6}$/i.test(color))) throw new Error('Choose valid filament colors.');
   if ([...parts, ...fins].some(part => (part.slot ?? 0) >= filaments.length)) throw new Error('A region refers to a missing filament slot.');
   if (!Number.isFinite(scale) || scale <= 0) throw new Error('Choose a positive print size.');
@@ -100,7 +103,7 @@ export function buildPrintProject({ name, parts, fins = [], filaments, scale, or
       '_rels/.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>',
       '3D/3dmodel.model': `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="${coreNS}" xmlns:m="${materialNS}"><metadata name="Application">PartLab</metadata><resources>${resources.join('')}</resources><build>${items.join('')}</build></model>`,
       'Metadata/model_settings.config': `<?xml version="1.0" encoding="UTF-8"?><config><object id="${builtId}"><metadata key="name" value="${xml(name)}"/>${config.join('')}</object></config>`,
-      'Metadata/project_settings.config': JSON.stringify({ filament_colour: filaments.slice(0, 32).map(color => color.toUpperCase()) })
+      'Metadata/project_settings.config': JSON.stringify({ filament_colour: filaments.map(color => color.toUpperCase()) })
     }
   };
 }
