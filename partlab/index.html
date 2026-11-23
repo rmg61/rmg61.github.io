@@ -34,9 +34,9 @@
           <p>Separate objects give you individually movable solids. Choose Assembled parts to slice them together. For fused figurines, Painted surface keeps the original mesh.</p>
         </div>
         <div class="fin-tools">
-          <h2>Support fins</h2><p>Click an underside in the assembled view. Each fin uses the color of its contact region.</p>
+          <h2>Support fins</h2><p>Click an underside in the assembled view. Tall fins get wider feet and keep a narrow contact tip. Each fin uses its contact region’s color.</p>
           <div class="fin-fields">
-            <label>Foot (mm)<input id="fin-foot" type="number" min="5" max="35" step="1" value="12"></label>
+            <label>Minimum foot (mm)<input id="fin-foot" type="number" min="5" max="35" step="1" value="12"></label>
             <label>Thickness (mm)<input id="fin-thickness" type="number" min="0.4" max="4" step="0.1" value="1.2"></label>
             <label>Top gap (mm)<input id="fin-gap" type="number" min="0" max="1" step="0.05" value="0.25"></label>
             <label>Foot angle (°)<input id="fin-angle" type="number" min="-180" max="180" step="15" value="0"></label>
@@ -59,6 +59,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.6"></script>
+  <script type="module" src="./app.js?v=0.3.7"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>

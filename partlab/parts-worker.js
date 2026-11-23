@@ -1,8 +1,14 @@
 import { splitConnected, bounds } from './geometry.js';
 import { findFigurineParts, figurineTriangleLimit } from './figurine-parts.js';
 
-self.onmessage = ({ data }) => {
+self.onmessage = async ({ data }) => {
   try {
+    if (data.infer && data.sources.length === 1 && data.sources[0].discoveryProfile === 'ogre') {
+      const { splitOgreRegions } = await import('./ogre-regions.js?v=0.3.7');
+      const parts = splitOgreRegions(data.sources[0].positions);
+      self.postMessage({ parts, segmentation: 'named' }, parts.map(part => part.positions.buffer));
+      return;
+    }
     const parts = [];
     let triangles = 0;
     for (const source of data.sources) {

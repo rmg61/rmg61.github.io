@@ -48,6 +48,24 @@ test('geometry of a bed-mounted support fin is watertight and leaves the request
   assert.match(files['Metadata/model_settings.config'], /<object id="3" auto_drop="0"><metadata key="name" value="Support fin 1"\/><metadata key="extruder" value="2"\/>/);
 });
 
+test('tall support fins widen at the bed while keeping the same narrow contact', () => {
+  const options = { bed: 0, scale: 1, angle: 0, footprint: 12, thickness: 1.2, gap: .25 };
+  const short = makeSupportFin({ ...options, anchor: [0, 0, 20.25] });
+  const tall = makeSupportFin({ ...options, anchor: [0, 0, 80.25] });
+  assert.equal(short.footLength, 12);
+  assert.equal(tall.footLength, 38.4);
+  function widthAt(fin, zMin) {
+    const x = [...fin.positions].filter((_, index) => index % 3 === 0 && fin.positions[index + 2] >= zMin);
+    return Math.max(...x) - Math.min(...x);
+  }
+  assert.equal(widthAt(short, 20), widthAt(tall, 80));
+  assert.ok(widthAt(tall, 0) > widthAt(tall, 80) * 10);
+  const result = buildPrintProject({
+    name: 'Tall fin', parts: [{ name: 'Fin', ...tall }], filaments: defaultFilaments, scale: 1, origin: [0, 0, 0]
+  });
+  assert.deepEqual(result.warnings, { open: 0, irregular: 0, removed: 0 });
+});
+
 test('separate fused regions are closed bodies with distinct build items and filament assignments', () => {
   const result = buildPrintProject({ name: 'Separated tetrahedron', parts: [
     { name: 'Lower', positions: faces.slice(0, 18) },

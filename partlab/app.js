@@ -4,7 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
-import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.6';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.7';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -36,8 +36,8 @@ function notice(message,error=false){$('notice').textContent=message;$('notice')
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
 function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/step-worker.js')?'classic':'module'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
 
-const analyzeParts = infer => workerJob('parts-worker.js?v=0.3.2', {
-  sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part) })),
+const analyzeParts = infer => workerJob('parts-worker.js?v=0.3.7', {
+  sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part), discoveryProfile: part.discoveryProfile })),
   infer
 });
 
@@ -71,7 +71,8 @@ function displayParts(data,discovered=false){
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
   document.body.classList.add('has-model');target.copy(center);$('dimensions').textContent=dims.toArray().map(n=>n.toLocaleString(undefined,{maximumFractionDigits:1})).join(' × ');
   if (!printFrame) {
-    $('print-width').value = parts[0]?.explosionOffset || span > 5000 ? 150 : Math.max(1, Number(span.toFixed(3)));
+    const prepared = parts[0]?.explosionOffset || parts[0]?.discoveryProfile === 'ogre';
+    $('print-width').value = prepared || span > 5000 ? 150 : Math.max(1, Number(span.toFixed(3)));
     $('print-width').disabled = false;
     $('add-fin').disabled = false;
   }
@@ -120,7 +121,17 @@ async function loadFile(file){
       showPreparedExplosion(true);
       return;
     }
-    if(ext==='stl'){const g=new STLLoader().parse(buffer);const root=new THREE.Mesh(g);root.name='Mesh';data=extract(root);g.dispose();}
+    if (ext === 'stl') {
+      const geometry = new STLLoader().parse(buffer);
+      const root = new THREE.Mesh(geometry);
+      root.name = 'Mesh';
+      data = extract(root);
+      disposeImported(root);
+      if (data.length === 1 && buffer.byteLength === 59_980_584) {
+        const { matchesOgreSTL } = await import('./ogre-regions.js?v=0.3.7');
+        if (await matchesOgreSTL(buffer)) data[0].discoveryProfile = 'ogre';
+      }
+    }
     else if(ext==='obj'){const root=new OBJLoader().parse(new TextDecoder().decode(buffer));data=extract(root);disposeImported(root);}
     else if(ext==='3mf'){// Check expanded package sizes before ThreeMFLoader decompresses the archive.
       checkZipSize(buffer);const root=new ThreeMFLoader().parse(buffer);data=extract(root);disposeImported(root);
@@ -133,7 +144,7 @@ function checkZipSize(buffer){const dv=new DataView(buffer);let total=0,entries=
 
 async function discover() {
   if (busy || !sources.length) return;
-  if (sources[0].explosionOffset) {
+  if (parts[0].explosionOffset) {
     parts.forEach(part => { part.mesh.visible = true; });
     renderPartList();
     showPreparedExplosion();
@@ -156,6 +167,10 @@ async function discover() {
     const oneSlot = parts.length === 1 ? parts[0].slot : undefined;
     displayParts(result.parts.map(part => ({ ...part, slot: assigned.get(part.name) ?? oneSlot })), true);
     updatePrintColors();
+    if (result.segmentation === 'named') {
+      showPreparedExplosion(true);
+      return;
+    }
     $('spread').value = result.segmentation === 'figurine' ? 40 : parts.length > 1 ? 70 : 0;
     spreadParts();
     fitView();
@@ -319,6 +334,42 @@ function removeLastFin() {
   $('fin-count').textContent = fins.length ? `${fins.length} placed` : 'No fins placed.';
 }
 
+function rayCrossings(hits, tolerance) {
+  const heights = [];
+  for (const hit of hits) {
+    const z = hit.point.z;
+    if (!heights.length || z - heights.at(-1) > tolerance) heights.push(z);
+  }
+  return heights;
+}
+
+function finCrossesModel(mesh, anchor, bed, scale, angle, footLength, thickness) {
+  model.updateMatrixWorld(true);
+  mesh.updateMatrixWorld(true);
+  const meshes = parts.map(part => part.mesh);
+  const probe = new THREE.Raycaster();
+  const up = new THREE.Vector3(0, 0, 1);
+  const clearance = .03 / scale;
+  for (const distance of [1, footLength * .25, footLength * .5, footLength * .75, footLength - .65]) {
+    for (const side of [-thickness * .6, 0, thickness * .6]) {
+      const x = anchor[0] + (Math.cos(angle) * distance - Math.sin(angle) * side) / scale;
+      const y = anchor[1] + (Math.sin(angle) * distance + Math.cos(angle) * side) / scale;
+      probe.set(new THREE.Vector3(x, y, bed - .2 / scale), up);
+      const finHeights = rayCrossings(probe.intersectObject(mesh), clearance);
+      if (finHeights.length < 2) continue;
+      const modelHeights = rayCrossings(probe.intersectObjects(meshes), clearance);
+      for (let index = 0; index + 1 < finHeights.length; index += 2) {
+        const low = finHeights[index] + clearance;
+        const high = finHeights[index + 1] - clearance;
+        if (low >= high) continue;
+        if (modelHeights.some(z => z >= low && z <= high) ||
+            modelHeights.filter(z => z < low).length % 2 === 1) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function placeSupport(hit) {
   try {
     const normal = hit?.face?.normal?.clone().transformDirection(hit.object.matrixWorld);
@@ -335,27 +386,19 @@ function placeSupport(hit) {
     const [footprint, thickness, gap, angleDegrees] = settings;
     const angle = Math.atan2(anchor[1] - printFrame.center.y, anchor[0] - printFrame.center.x) + THREE.MathUtils.degToRad(angleDegrees);
     const data = makeSupportFin({ anchor, bed, scale, angle, footprint, thickness, gap });
-    const usableMeshes = parts.map(candidate => candidate.mesh);
-    const probe = new THREE.Raycaster();
-    const sampleZ = Math.max(bed, anchor[2] - (gap + 1.5) / scale);
-    // Check several columns along the fin web. Final contact and toolpaths can be inspected in the slicer.
-    for (const distance of [1, (footprint + 1.5) / 2, footprint - .65]) {
-      for (const side of [-thickness / 2, 0, thickness / 2]) {
-        const x = anchor[0] + (Math.cos(angle) * distance - Math.sin(angle) * side) / scale;
-        const y = anchor[1] + (Math.sin(angle) * distance + Math.cos(angle) * side) / scale;
-        probe.set(new THREE.Vector3(x, y, bed - .2 / scale), new THREE.Vector3(0, 0, 1));
-        const near = probe.intersectObjects(usableMeshes)[0];
-        if (near && near.point.z < sampleZ) throw new Error('The fin path crosses the model. Change its foot angle or choose another underside.');
-      }
-    }
     const mesh = new THREE.Mesh(geometryFromPart(data), new THREE.MeshStandardMaterial({ color: '#cb8e54', roughness: .8, side: THREE.DoubleSide }));
+    if (finCrossesModel(mesh, anchor, bed, scale, angle, data.footLength, thickness)) {
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      throw new Error('The fin path crosses the model. Change its foot angle or choose another underside.');
+    }
     finGroup.add(mesh);
     fins.push({ ...data, name: `Support fin ${fins.length + 1}`, part, mesh });
     $('undo-fin').disabled = false;
     $('print-width').disabled = true;
     $('fin-count').textContent = `${fins.length} placed`;
     updatePrintColors();
-    notice(`Fin ${fins.length} placed under ${part.name}. Click another underside or choose Done placing.`);
+    notice(`Fin ${fins.length} placed under ${part.name} with a ${Number(data.footLength.toFixed(1))} mm foot. Click another underside or choose Done placing.`);
   } catch (error) {
     notice(error.message, true);
   }
@@ -367,7 +410,7 @@ async function makePrint3MF() {
   const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
   const layout = $('print-layout').value;
   const fused = parts.some(part => part.inferred || part.explosionOffset);
-  return workerJob('print-worker.js?v=0.3.6', {
+  return workerJob('print-worker.js?v=0.3.7', {
     name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
     scale, origin: printFrame.origin, fused, plate: printPlate(),
     separateRegions: layout !== 'paint',

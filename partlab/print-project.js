@@ -169,8 +169,9 @@ export function makeSupportFin({ anchor, bed, scale, angle, footprint, thickness
   const base = Math.min(.8, height * .15);
   const tip = Math.min(.65, height * .13);
   const bodyThickness = Math.max(thickness, .4);
+  const footLength = Math.max(footprint, height * .48, reach + bodyThickness + 1.3);
   // The rounded toe is approximated by a bevel. The tab stays horizontal at the top.
-  const profile = [[.65, 0], [footprint - .65, 0], [footprint, base],
+  const profile = [[.65, 0], [footLength - .65, 0], [footLength, base],
     [reach + bodyThickness, height], [0, height], [0, height - tip],
     [reach, height - tip], [.15, base]];
   const local = profile.map(([x, z]) => ({ x, z, width: z <= base ? bodyThickness * 1.9 : z === height && x === 0 ? bodyThickness * .5 : bodyThickness }));
@@ -208,5 +209,5 @@ export function makeSupportFin({ anchor, bed, scale, angle, footprint, thickness
     const j = (i + 1) % n;
     indices.push(i, i + n, j + n, i, j + n, j);
   }
-  return { positions: new Float32Array(vertices), indices: new Uint16Array(indices) };
+  return { positions: new Float32Array(vertices), indices: new Uint16Array(indices), footLength };
 }
