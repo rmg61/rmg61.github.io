@@ -27,6 +27,11 @@ const target=new THREE.Vector3(),raycaster=new THREE.Raycaster(),pointer=new THR
 let sources=[],parts=[],isDiscovered=false,selected=-1,modelName='',span=100,busy=false,drag=null,zoomMin=.01,zoomMax=1e7;
 let activeWorker=null,workerReject=null;
 
+function previewFilamentColor(part) {
+  if (part.slot === undefined && !showPrintColors) return undefined;
+  return filaments[part.slot ?? 0];
+}
+
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
 function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/step-worker.js')?'classic':'module'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
@@ -54,12 +59,12 @@ function displayParts(data,discovered=false){
     const color = part.color ?? palette[index % palette.length];
     const geometry = geometryFromPart(part);
     const material = new THREE.MeshStandardMaterial({
-      color: discovered ? color : '#a1bbca', metalness: .22, roughness: .46, side: THREE.DoubleSide
+      color: previewFilamentColor(part) ?? (discovered ? color : '#a1bbca'), metalness: .22, roughness: .46, side: THREE.DoubleSide
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.partIndex = index;
     model.add(mesh);
-    return { ...part, mesh, color, slot: part.slot ?? 0, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
+    return { ...part, mesh, color, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
   });
   const box=new THREE.Box3().setFromObject(model);const center=box.getCenter(new THREE.Vector3());const dims=box.getSize(new THREE.Vector3());span=Math.max(...dims.toArray(),.001);zoomMin=span*.005;zoomMax=span*200;
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
@@ -88,7 +93,7 @@ function spreadParts() {
 }
 function renderPartList(){
   $('parts').replaceChildren();$('part-count').textContent=isDiscovered?parts.length:0;$('show-all').hidden=!isDiscovered;$('isolate-part').hidden=!isDiscovered;$('isolate-part').disabled=selected<0;$('parts-hint').textContent=isDiscovered?'Click to select · Hide to inspect inside.':'Run discovery to identify geometric pieces.';
-  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=showPrintColors?filaments[p.slot]:p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;choose.setAttribute('aria-pressed',String(selected===i));const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=triangleCount(p).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye,filamentSelect(p));$('parts').append(card);});
+  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=previewFilamentColor(p)??p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;choose.setAttribute('aria-pressed',String(selected===i));const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=triangleCount(p).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye,filamentSelect(p));$('parts').append(card);});
 }
 function selectPart(i){selected=i;parts.forEach((p,k)=>{p.mesh.material.emissive.set(k===i?'#264d40':'#000000');p.mesh.material.emissiveIntensity=k===i?.8:0;});renderPartList();}
 
@@ -143,7 +148,7 @@ async function discover() {
   try {
     const result = await analyzeParts(true);
     const assigned = new Map(parts.map(part => [part.name, part.slot]));
-    const oneSlot = parts.length === 1 ? parts[0].slot : 0;
+    const oneSlot = parts.length === 1 ? parts[0].slot : undefined;
     displayParts(result.parts.map(part => ({ ...part, slot: assigned.get(part.name) ?? oneSlot })), true);
     updatePrintColors();
     $('spread').value = result.segmentation === 'figurine' ? 40 : parts.length > 1 ? 70 : 0;
@@ -217,7 +222,6 @@ function renderFilaments() {
     picker.setAttribute('aria-label', `Filament ${slot + 1} color`);
     picker.oninput = () => {
       filaments[slot] = picker.value;
-      showPrintColors = true;
       updatePrintColors();
     };
     label.append(picker);
@@ -229,11 +233,11 @@ function filamentSelect(part) {
   const select = document.createElement('select');
   select.className = 'filament-slot';
   select.setAttribute('aria-label', `Filament slot for ${part.name}`);
+  select.add(new Option('Unassigned', ''));
   filaments.forEach((_, slot) => select.add(new Option(`Filament ${slot + 1}`, String(slot))));
-  select.value = String(part.slot);
+  select.value = part.slot === undefined ? '' : String(part.slot);
   select.onchange = () => {
-    part.slot = Number(select.value);
-    showPrintColors = true;
+    part.slot = select.value === '' ? undefined : Number(select.value);
     updatePrintColors();
   };
   return select;
@@ -241,13 +245,14 @@ function filamentSelect(part) {
 
 function updatePrintColors() {
   $('paint-view').setAttribute('aria-pressed', String(showPrintColors));
-  $('paint-view').textContent = showPrintColors ? 'Show region colors' : 'Show print colors';
+  $('paint-view').textContent = showPrintColors ? 'Restore unassigned region colors' : 'Show print colors';
   const swatches = $('parts').querySelectorAll('.part-color');
   parts.forEach((part, index) => {
-    part.mesh.material.color.set(showPrintColors ? filaments[part.slot] : isDiscovered ? part.color : '#a1bbca');
-    if (swatches[index]) swatches[index].style.background = showPrintColors ? filaments[part.slot] : part.color;
+    const printColor = previewFilamentColor(part);
+    part.mesh.material.color.set(printColor ?? (isDiscovered ? part.color : '#a1bbca'));
+    if (swatches[index]) swatches[index].style.background = printColor ?? part.color;
   });
-  for (const fin of fins) fin.mesh.material.color.set(showPrintColors ? filaments[fin.part.slot] : '#cb8e54');
+  for (const fin of fins) fin.mesh.material.color.set(previewFilamentColor(fin.part) ?? '#cb8e54');
 }
 
 function resetPrintSetup() {

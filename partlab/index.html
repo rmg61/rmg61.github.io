@@ -19,7 +19,7 @@
       <details class="print-card" id="print-setup" hidden>
         <summary>Print setup</summary>
         <label for="print-width">Largest model dimension (mm)</label><input id="print-width" type="number" min="1" max="5000" step="any" value="100">
-        <p>Click any of the eight swatches to choose a color. Assign a filament in the Parts list. Parts can share a filament.</p>
+        <p>Edit any of the eight filament colors, then assign it in the Parts list. Unassigned parts use Filament 1 in the 3MF export.</p>
         <div id="filaments" class="filament-palette"></div>
         <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
         <div class="fin-tools">
@@ -47,6 +47,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.2"></script>
+  <script type="module" src="./app.js?v=0.3.3"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>

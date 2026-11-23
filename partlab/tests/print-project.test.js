@@ -12,7 +12,7 @@ const faces = new Float32Array([
 test('color export joins fused patches into one indexed part and preserves eight custom filament colors', () => {
   const filaments = ['#1a2b3c', '#334455', '#887766', '#fedcba', '#aabbcc', '#0f3355', '#72bb40', '#e35f21'];
   const { files, warnings } = buildPrintProject({ name: 'Test', parts: [
-    { name: 'Lower', positions: faces.slice(0, 18), slot: 0 },
+    { name: 'Lower', positions: faces.slice(0, 18) },
     { name: 'Upper', positions: faces.slice(18), slot: 7 }
   ], filaments, scale: 22, origin: [0, 0, 0], fused: true });
   const model = files['3D/3dmodel.model'];
@@ -20,6 +20,7 @@ test('color export joins fused patches into one indexed part and preserves eight
   assert.equal([...model.matchAll(/<vertex /g)].length, 4);
   assert.deepEqual([...model.matchAll(/<m:color color="([^"]+)"/g)].map(match => match[1]), filaments.map(color => color.toUpperCase()));
   assert.match(model, /p1="7" p2="7" p3="7" paint_color="5C"/);
+  assert.equal([...model.matchAll(/p1="0" p2="0" p3="0" paint_color="4"/g)].length, 2);
   assert.deepEqual(JSON.parse(files['Metadata/project_settings.config']).filament_colour, filaments.map(color => color.toUpperCase()));
 });
 
