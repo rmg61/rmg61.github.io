@@ -1,3 +1,5 @@
+import { buildRegionSolids } from './region-solids.js?v=0.3.5';
+
 export const coreNS = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 export const materialNS = 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02';
 export const defaultFilaments = Object.freeze([
@@ -25,7 +27,6 @@ function indexedBody(parts, scale, origin) {
     const { positions, indices } = part;
     const count = indices?.length ?? positions.length / 3;
     const slot = part.slot ?? 0;
-    if (!Number.isInteger(slot) || slot < 0) throw new Error('Assign a valid filament slot.');
     for (let triangle = 0; triangle < count; triangle += 3) {
       const corners = [];
       for (let j = 0; j < 3; j++) {
@@ -61,48 +62,52 @@ function indexedBody(parts, scale, origin) {
   return { vertices, faces, open, irregular, removed };
 }
 
-export function buildPrintProject({ name, parts, fins = [], filaments, scale, origin, fused }) {
+export function buildPrintProject({ name, parts, fins = [], filaments, scale, origin, fused, separateRegions = true }) {
   if (filaments.length > defaultFilaments.length) throw new Error(`Use at most ${defaultFilaments.length} filament slots.`);
   if (!filaments.length || filaments.some(color => !/^#[0-9a-f]{6}$/i.test(color))) throw new Error('Choose valid filament colors.');
-  if ([...parts, ...fins].some(part => (part.slot ?? 0) >= filaments.length)) throw new Error('A region refers to a missing filament slot.');
+  if (!parts.length) throw new Error('Open a model before exporting.');
+  if ([...parts, ...fins].some(({ slot = 0 }) => !Number.isInteger(slot) || slot < 0 || slot >= filaments.length)) {
+    throw new Error('A region refers to a missing filament slot.');
+  }
   if (!Number.isFinite(scale) || scale <= 0) throw new Error('Choose a positive print size.');
-  const groups = fused ? [{ name, parts }] : parts.map(part => ({ name: part.name, parts: [part] }));
+  const groups = fused && !separateRegions ? [{ name, parts }] : parts.map(part => ({ name: part.name, parts: [part] }));
+  let pitch;
+  if (fused && separateRegions) {
+    const markedRegions = parts.filter(part => part.inferred || part.explosionOffset);
+    const regions = markedRegions.length ? markedRegions : parts;
+    const converted = buildRegionSolids(regions, scale, origin);
+    pitch = converted.pitch;
+    const byRegion = new Map(regions.map((part, index) => [part, converted.bodies[index]]));
+    for (const group of groups) group.body = byRegion.get(group.parts[0]);
+  }
   for (const fin of fins) groups.push({ name: fin.name, parts: [fin] });
   const warnings = { open: 0, irregular: 0, removed: 0 };
   const palette = filaments.map(color => `<m:color color="${color.toUpperCase()}"/>`).join('');
   const resources = [`<m:colorgroup id="1">${palette}</m:colorgroup>`];
   const items = [];
-  const components = [];
   const config = [];
-  const rootId = groups.length + 2;
   for (const [index, group] of groups.entries()) {
-    const body = indexedBody(group.parts, scale, origin);
+    const body = group.body ?? indexedBody(group.parts, scale, origin);
     for (const key of Object.keys(warnings)) warnings[key] += body[key];
     const id = index + 2;
     const defaultSlot = group.parts[0].slot ?? 0;
-    const vertices = body.vertices.map(([x, y, z]) => `<vertex x="${x}" y="${y}" z="${z}"/>`).join('');
+    const vertices = body.vertices.map(([x, y, z]) => `<vertex x="${number(x)}" y="${number(y)}" z="${number(z)}"/>`).join('');
     const faces = body.faces.map(({ corners: [a, b, c], slot }) => {
-      const paint = orcaPaintCode(slot);
+      const paint = group.parts.length > 1 ? orcaPaintCode(slot) : '';
       return `<triangle v1="${a}" v2="${b}" v3="${c}" pid="1" p1="${slot}" p2="${slot}" p3="${slot}"${paint ? ` paint_color="${paint}"` : ''}/>`;
     }).join('');
     resources.push(`<object id="${id}" type="model" name="${xml(group.name)}" pid="1" pindex="${defaultSlot}"><mesh><vertices>${vertices}</vertices><triangles>${faces}</triangles></mesh></object>`);
-    components.push(`<component objectid="${id}"/>`);
-    config.push(`<part id="${id}" subtype="normal_part"><metadata key="name" value="${xml(group.name)}"/><metadata key="extruder" value="${defaultSlot + 1}"/></part>`);
+    items.push(`<item objectid="${id}" printable="1"/>`);
+    const metadata = `<metadata key="name" value="${xml(group.name)}"/><metadata key="extruder" value="${defaultSlot + 1}"/>`;
+    config.push(`<object id="${id}" auto_drop="0">${metadata}<part id="${id}" subtype="normal_part">${metadata}</part></object>`);
   }
-  if (groups.length === 1) {
-    items.push('<item objectid="2"/>');
-  } else {
-    resources.push(`<object id="${rootId}" type="model" name="${xml(name)}"><components>${components.join('')}</components></object>`);
-    items.push(`<item objectid="${rootId}"/>`);
-  }
-  const builtId = groups.length === 1 ? 2 : rootId;
   return {
-    warnings,
+    warnings, objectCount: groups.length, pitch,
     files: {
       '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="config" ContentType="application/octet-stream"/></Types>',
       '_rels/.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>',
       '3D/3dmodel.model': `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="${coreNS}" xmlns:m="${materialNS}"><metadata name="Application">PartLab</metadata><resources>${resources.join('')}</resources><build>${items.join('')}</build></model>`,
-      'Metadata/model_settings.config': `<?xml version="1.0" encoding="UTF-8"?><config><object id="${builtId}"><metadata key="name" value="${xml(name)}"/>${config.join('')}</object></config>`,
+      'Metadata/model_settings.config': `<?xml version="1.0" encoding="UTF-8"?><config>${config.join('')}</config>`,
       'Metadata/project_settings.config': JSON.stringify({ filament_colour: filaments.map(color => color.toUpperCase()) })
     }
   };

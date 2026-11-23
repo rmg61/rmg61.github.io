@@ -14,7 +14,7 @@ test('color export joins fused patches into one indexed part and preserves eight
   const { files, warnings } = buildPrintProject({ name: 'Test', parts: [
     { name: 'Lower', positions: faces.slice(0, 18) },
     { name: 'Upper', positions: faces.slice(18), slot: 7 }
-  ], filaments, scale: 22, origin: [0, 0, 0], fused: true });
+  ], filaments, scale: 22, origin: [0, 0, 0], fused: true, separateRegions: false });
   const model = files['3D/3dmodel.model'];
   assert.deepEqual(warnings, { open: 0, irregular: 0, removed: 0 });
   assert.equal([...model.matchAll(/<vertex /g)].length, 4);
@@ -44,7 +44,36 @@ test('geometry of a bed-mounted support fin is watertight and leaves the request
     fins: [{ ...fin, name: 'Support fin 1', slot: 1 }], filaments: ['#FFFFFF','#663300'], scale: .5, origin: [4, 3, 2], fused: false });
   assert.deepEqual(warnings, { open: 0, irregular: 0, removed: 0 });
   assert.match(files['3D/3dmodel.model'], /name="Support fin 1"/);
-  assert.match(files['3D/3dmodel.model'], /<component objectid="3"\/>/);
+  assert.match(files['3D/3dmodel.model'], /<build><item objectid="2" printable="1"\/><item objectid="3" printable="1"\/><\/build>/);
+  assert.match(files['Metadata/model_settings.config'], /<object id="3" auto_drop="0"><metadata key="name" value="Support fin 1"\/><metadata key="extruder" value="2"\/>/);
+});
+
+test('separate fused regions are closed bodies with distinct build items and filament assignments', () => {
+  const result = buildPrintProject({ name: 'Separated tetrahedron', parts: [
+    { name: 'Lower', positions: faces.slice(0, 18) },
+    { name: 'Upper', positions: faces.slice(18), slot: 2 }
+  ], filaments: defaultFilaments, scale: 4, origin: [0, 0, 0], fused: true });
+  const model = result.files['3D/3dmodel.model'];
+  assert.equal(result.objectCount, 2);
+  assert.equal(result.pitch, .35);
+  assert.deepEqual(result.warnings, { open: 0, irregular: 0, removed: 0 });
+  assert.match(model, /<build><item objectid="2" printable="1"\/><item objectid="3" printable="1"\/><\/build>/);
+  assert.match(result.files['Metadata/model_settings.config'], /id="3" auto_drop="0"><metadata key="name" value="Upper"\/><metadata key="extruder" value="3"\/>/);
+  for (const mesh of model.matchAll(/<triangles>(.*?)<\/triangles>/g)) {
+    const edges = new Map();
+    for (const [, ...corners] of mesh[1].matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g)) {
+      corners.forEach((a, index) => {
+        const b = corners[(index + 1) % 3];
+        const key = [a, b].sort().join(',');
+        const tally = edges.get(key) ?? [0, 0];
+        tally[0]++;
+        tally[1] += a < b ? 1 : -1;
+        edges.set(key, tally);
+      });
+    }
+    assert.ok(edges.size > 0);
+    assert.ok([...edges.values()].every(([count, direction]) => count === 2 && direction === 0));
+  }
 });
 
 test('3MF colors remain possible beyond the Orca-specific paint codes', () => {

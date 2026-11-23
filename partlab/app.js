@@ -4,7 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
-import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.1';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.5';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -56,21 +56,23 @@ function clearParts(){for(const p of parts){model.remove(p.mesh);p.mesh.geometry
 function displayParts(data,discovered=false){
   clearParts();isDiscovered=discovered;selected=-1;$('spread').value=0;$('spread-value').value='0%';
   parts = data.map((part, index) => {
+    const slot = part.slot ?? (discovered && data.length > 1 ? index % filaments.length : undefined);
     const color = part.color ?? palette[index % palette.length];
     const geometry = geometryFromPart(part);
     const material = new THREE.MeshStandardMaterial({
-      color: previewFilamentColor(part) ?? (discovered ? color : '#a1bbca'), metalness: .22, roughness: .46, side: THREE.DoubleSide
+      color: previewFilamentColor({ slot }) ?? (discovered ? color : '#a1bbca'), metalness: .22, roughness: .46, side: THREE.DoubleSide
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.partIndex = index;
     model.add(mesh);
-    return { ...part, mesh, color, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
+    return { ...part, mesh, color, slot, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
   });
   const box=new THREE.Box3().setFromObject(model);const center=box.getCenter(new THREE.Vector3());const dims=box.getSize(new THREE.Vector3());span=Math.max(...dims.toArray(),.001);zoomMin=span*.005;zoomMax=span*200;
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
   if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}grid=new THREE.GridHelper(span*3,24,0x425867,0x263541);grid.rotation.x=Math.PI/2;grid.position.set(center.x,center.y,box.min.z-span*.025);scene.add(grid);
   document.body.classList.add('has-model');target.copy(center);$('dimensions').textContent=dims.toArray().map(n=>n.toLocaleString(undefined,{maximumFractionDigits:1})).join(' × ');
   printFrame = { origin: [center.x, center.y, box.min.z], center, span };
+  $('layout-row').hidden = !parts.some(part => part.inferred || part.explosionOffset);
   if ($('print-setup').hidden) {
     $('print-setup').hidden = false;
     $('print-width').value = parts[0]?.explosionOffset || span > 5000 ? 150 : Math.max(1, Number(span.toFixed(3)));
@@ -261,6 +263,7 @@ function resetPrintSetup() {
   showPrintColors = false;
   updatePrintColors();
   setFinMode(false);
+  $('print-layout').value = 'objects';
   $('print-setup').hidden = true;
 }
 
@@ -333,11 +336,12 @@ function placeSupport(hit) {
 
 async function makePrint3MF() {
   const scale = printScale();
-  const fileParts = parts.map(({ name, positions, indices, slot }) => ({ name, positions, indices, slot }));
+  const fileParts = parts.map(({ name, positions, indices, slot, inferred, explosionOffset }) => ({ name, positions, indices, slot, inferred, explosionOffset }));
   const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
-  return workerJob('print-worker.js?v=0.3.1', {
+  return workerJob('print-worker.js?v=0.3.5', {
     name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
-    scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset)
+    scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset),
+    separateRegions: $('print-layout').value === 'objects'
   });
 }
 const exportTypes = {
@@ -386,10 +390,11 @@ async function exportModel() {
       details = 'Faceted STEP export.';
     }
     if (format === '3mf') {
-      const { bytes, warnings } = await makePrint3MF();
+      const { bytes, warnings, objectCount, pitch } = await makePrint3MF();
       payload = bytes;
       const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
-      details = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}`;
+      const resolution = pitch ? ` Fused regions were remeshed at ${pitch.toFixed(2)} mm.` : '';
+      details = `3MF exported with ${objectCount} object${objectCount === 1 ? '' : 's'} and filament assignments.${resolution} Preview the slice before printing.${topology}`;
     }
     const file = new Blob([payload], { type: mime });
     if (destination) {
@@ -420,6 +425,33 @@ async function exportModel() {
     setBusy(false);
   }
 }
+
+const partsPanel = $('parts-panel');
+const partsResize = $('parts-resize');
+function reportPanelHeight() {
+  partsResize.setAttribute('aria-valuemax', String(Math.floor(parseFloat(getComputedStyle(partsPanel).maxHeight))));
+  partsResize.setAttribute('aria-valuenow', String(partsPanel.offsetHeight));
+  partsResize.setAttribute('aria-valuetext', partsPanel.offsetHeight + ' pixels');
+}
+new ResizeObserver(reportPanelHeight).observe(partsPanel);
+window.addEventListener('resize', reportPanelHeight);
+partsResize.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  partsResize.setPointerCapture(event.pointerId);
+  const startY = event.clientY;
+  const height = partsPanel.offsetHeight;
+  const move = e => {
+    if (e.pointerId === event.pointerId) partsPanel.style.height = Math.max(96, height + startY - e.clientY) + 'px';
+  };
+  partsResize.addEventListener('pointermove', move);
+  partsResize.addEventListener('lostpointercapture', () => partsResize.removeEventListener('pointermove', move), { once: true });
+});
+partsResize.addEventListener('keydown', event => {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  event.preventDefault();
+  const delta = event.key === 'ArrowUp' ? 24 : -24;
+  partsPanel.style.height = Math.max(96, partsPanel.offsetHeight + delta) + 'px';
+});
 
 // A short left click selects a part. A drag can start anywhere in the canvas.
 const canvas = renderer.domElement;

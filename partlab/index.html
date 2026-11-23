@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PartLab — Model explorer</title>
-  <link rel="stylesheet" href="./style.css?v=0.3.1">
+  <link rel="stylesheet" href="./style.css?v=0.3.5">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","fflate":"https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"}}</script>
 </head>
 <body>
@@ -22,6 +22,11 @@
         <p>Edit any of the eight filament colors, then assign it in the Parts list. Unassigned parts use Filament 1 in the 3MF export.</p>
         <div id="filaments" class="filament-palette"></div>
         <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
+        <div id="layout-row" hidden>
+          <label for="print-layout">3MF layout</label>
+          <select id="print-layout"><option value="objects">Separate objects</option><option value="paint">Painted surface</option></select>
+          <p>Separate objects remesh fused regions into solids. Painted surface keeps the original exterior mesh.</p>
+        </div>
         <div class="fin-tools">
           <h2>Support fins</h2><p>Click an underside in the assembled view. Each fin uses the color of its contact region.</p>
           <div class="fin-fields">
@@ -42,11 +47,12 @@
       <div class="workspace-top"><div><span class="eyebrow">3D VIEWPORT</span><span id="model-badge" class="badge">READY FOR A MODEL</span></div><div class="export-group"><select id="format" aria-label="Export format"><option value="stl">STL</option><option value="obj">OBJ</option><option value="3mf">3MF</option><option value="step">STEP · faceted</option></select><button id="export" class="secondary" disabled>Export ↓</button></div></div>
       <div id="viewport"><div class="empty" id="empty"><div class="empty-symbol">◈</div><h2>Open a 3D model</h2><p>Drop a file here or try the one-piece sample.</p><button id="empty-demo" class="primary">Explore the astronaut</button></div><div class="view-label">PERSPECTIVE <span> / </span> Z UP</div><div class="orientation"><button data-view="iso" title="Isometric view">ISO</button><button data-view="front">FRONT</button><button data-view="top">TOP</button><button data-view="right">RIGHT</button></div><button id="fit" class="fit" title="Fit model (F)">⌖ &nbsp; Fit view</button><div class="busy" id="busy" hidden><span class="spinner"></span><span id="busy-text">Loading model…</span></div></div>
       <div class="notice" id="notice" role="status" aria-live="polite">Open a model to begin. Maximum file size: 80 MB.</div>
-      <section class="parts-panel"><div class="parts-heading"><h2>Parts <span id="part-count">0</span></h2><span id="parts-hint">Run discovery to identify geometric pieces.</span><button id="show-all" class="text-button" hidden>Show all</button><button id="isolate-part" class="text-button" hidden>Isolate selected</button></div><div id="parts" class="parts"><div class="parts-empty">Your model’s parts will appear here.</div></div></section>
+      <div id="parts-resize" role="separator" tabindex="0" aria-label="Resize Parts panel" aria-controls="parts-panel" aria-orientation="horizontal" aria-valuemin="96" title="Drag up or down to resize Parts"></div>
+      <section class="parts-panel" id="parts-panel"><div class="parts-heading"><h2>Parts <span id="part-count">0</span></h2><span id="parts-hint">Run discovery to identify geometric pieces.</span><button id="show-all" class="text-button" hidden>Show all</button><button id="isolate-part" class="text-button" hidden>Isolate selected</button></div><div id="parts" class="parts"><div class="parts-empty">Your model’s parts will appear here.</div></div></section>
       <footer><span><kbd>Left or right drag</kbd> Orbit &nbsp; <kbd>Middle drag</kbd> Pan &nbsp; <kbd>Shift + middle drag</kbd> Orbit &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>F</kbd> Fit</span><span>Left click to select a part</span></footer>
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.4"></script>
+  <script type="module" src="./app.js?v=0.3.5"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>
