@@ -28,6 +28,7 @@ export function buildRegionSolids(parts, scale, origin) {
   const inside = new Uint8Array(nx * ny * nz);
   const labels = new Uint16Array(inside.length);
   const distance = new Float32Array(inside.length).fill(Infinity);
+  const surfaceCrossings = dims.map(() => new Map());
 
   function rasterize(axis, hit) {
     const u = (axis + 1) % 3;
@@ -73,6 +74,17 @@ export function buildRegionSolids(parts, scale, origin) {
   function seed(column, depth, label, axis) {
     const position = depth - offset[axis];
     const lower = Math.floor(position);
+    if (lower >= 0 && lower + 1 < dims[axis]) {
+      const index = column + lower * stride[axis];
+      if (inside[index] !== inside[index + stride[axis]]) {
+        const crossings = surfaceCrossings[axis];
+        const previous = crossings.get(index);
+        const midpoint = lower + offset[axis] + .5;
+        if (previous === undefined || Math.abs(depth - midpoint) < Math.abs(previous - midpoint)) {
+          crossings.set(index, depth);
+        }
+      }
+    }
     for (let cell = lower; cell <= lower + 1; cell++) {
       if (cell < 0 || cell >= dims[axis]) continue;
       const index = column + cell * stride[axis];
@@ -105,7 +117,7 @@ export function buildRegionSolids(parts, scale, origin) {
     for (const { depth, label } of crossings) seed(index, depth, label, 2);
   }
   if (!hitColumns || oddColumns > Math.max(2, hitColumns * .005)) {
-    throw new Error('Too many gaps in the fused mesh to create separate solids. Try the Painted surface layout or repair the source mesh.');
+    throw new Error('Too many gaps in the fused mesh to create separate solids. Try Full detail or repair the source mesh.');
   }
   rasterize(0, (column, depth, label) => seed(column, depth, label, 0));
   rasterize(1, (column, depth, label) => seed(column, depth, label, 1));
@@ -127,7 +139,7 @@ export function buildRegionSolids(parts, scale, origin) {
       }
     }
   }
-  if (length !== occupied) throw new Error('Some interior cells have no matching surface region. Try the Painted surface layout.');
+  if (length !== occupied) throw new Error('Some interior cells have no matching surface region. Try Full detail.');
 
   const gx = nx + 1, layer = gx * (ny + 1);
   const quads = parts.map(() => []);
@@ -154,10 +166,46 @@ export function buildRegionSolids(parts, scale, origin) {
   }
   const missing = parts.filter((_, index) => !quads[index].length);
   if (missing.length) {
-    throw new Error(`Separate solids could not preserve ${missing.length === 1 ? missing[0].name : missing.length + ' small regions'} at this print size. Increase the size or choose Painted surface.`);
+    throw new Error(`Separate solids could not preserve ${missing.length === 1 ? missing[0].name : missing.length + ' small regions'} at this print size. Increase the size or choose Full detail.`);
   }
-  const gridPoint = index => [index % gx, Math.floor(index / gx) % (ny + 1), Math.floor(index / layer)]
-    .map((value, axis) => (value + start[axis]) * pitch);
+  // Move the exterior vertices toward the original surface by averaging the
+  // actual ray intersections in their dual cell. Interior seams use the same
+  // vertex positions on both bodies and stay on the grid away from the surface.
+  const surfacePoints = new Map();
+  function gridPoint(index) {
+    const saved = surfacePoints.get(index);
+    if (saved) return saved;
+    const corner = [index % gx, Math.floor(index / gx) % (ny + 1), Math.floor(index / layer)];
+    const sum = [0, 0, 0];
+    let count = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      const u = (axis + 1) % 3, v = (axis + 2) % 3;
+      if (corner[axis] <= 0 || corner[axis] >= dims[axis]) continue;
+      const crossings = surfaceCrossings[axis];
+      for (let du = -1; du <= 0; du++) {
+        const a = corner[u] + du;
+        if (a < 0 || a >= dims[u]) continue;
+        for (let dv = -1; dv <= 0; dv++) {
+          const b = corner[v] + dv;
+          if (b < 0 || b >= dims[v]) continue;
+          const lower = (corner[axis] - 1) * stride[axis] + a * stride[u] + b * stride[v];
+          const depth = crossings.get(lower);
+          if (depth === undefined) continue;
+          sum[axis] += depth - corner[axis];
+          sum[u] += du + offset[u];
+          sum[v] += dv + offset[v];
+          count++;
+        }
+      }
+    }
+    const point = corner.map((value, axis) => {
+      // Keep vertices within their dual cell even on a sub-voxel feature.
+      const shift = count ? Math.max(-.48, Math.min(.48, sum[axis] / count)) : 0;
+      return (value + start[axis] + shift) * pitch;
+    });
+    if (count) surfacePoints.set(index, point);
+    return point;
+  }
   return {
     pitch,
     bodies: quads.map((faces, index) => meshRegion(faces, gridPoint, gx, layer, parts[index].slot ?? 0))

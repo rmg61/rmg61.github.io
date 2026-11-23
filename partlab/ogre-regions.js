@@ -89,7 +89,7 @@ function weldedVertexIds(positions) {
     }
     ids[j] = id;
   }
-  return ids;
+  return { ids, vertexCount: vertices.size };
 }
 
 function sharedEdges(ids) {
@@ -294,22 +294,54 @@ function joinLabelIslands(labels, adjacency) {
   }
 }
 
+function smoothVertexNormals(positions, ids, vertexCount) {
+  const sums = new Float64Array(vertexCount * 3);
+  for (let i = 0, corner = 0; i < positions.length; i += 9, corner += 3) {
+    const ux = positions[i + 3] - positions[i], uy = positions[i + 4] - positions[i + 1], uz = positions[i + 5] - positions[i + 2];
+    const vx = positions[i + 6] - positions[i], vy = positions[i + 7] - positions[i + 1], vz = positions[i + 8] - positions[i + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    for (let j = 0; j < 3; j++) {
+      const at = ids[corner + j] * 3;
+      sums[at] += nx;
+      sums[at + 1] += ny;
+      sums[at + 2] += nz;
+    }
+  }
+  const normals = new Float32Array(sums.length);
+  for (let i = 0; i < normals.length; i += 3) {
+    const length = Math.hypot(sums[i], sums[i + 1], sums[i + 2]) || 1;
+    normals[i] = sums[i] / length;
+    normals[i + 1] = sums[i + 1] / length;
+    normals[i + 2] = sums[i + 2] / length;
+  }
+  return normals;
+}
+
 export function splitOgreRegions(positions) {
   if (positions.length !== sourceTriangles * 9) throw new Error('Unexpected Ogre triangle count.');
-  const adjacency = sharedEdges(weldedVertexIds(positions));
+  const { ids, vertexCount } = weldedVertexIds(positions);
+  const adjacency = sharedEdges(ids);
   const labels = seamLabels(positions, adjacency);
   joinLabelIslands(labels, adjacency);
   const counts = new Uint32Array(regions.length);
   for (const label of labels) counts[label]++;
   if (counts.some(count => count === 0)) throw new Error('An authored Ogre region is empty.');
   const result = regions.map(([name, direction], index) => ({
-    name, positions: new Float32Array(counts[index] * 9), explosionOffset: direction.map(value => value * 350)
+    name, positions: new Float32Array(counts[index] * 9), normals: new Float32Array(counts[index] * 9),
+    explosionOffset: direction.map(value => value * 350)
   }));
+  const normals = smoothVertexNormals(positions, ids, vertexCount);
   counts.fill(0);
   for (let face = 0; face < labels.length; face++) {
     const label = labels[face];
     const start = face * 9;
-    result[label].positions.set(positions.subarray(start, start + 9), counts[label]);
+    const part = result[label];
+    const offset = counts[label];
+    part.positions.set(positions.subarray(start, start + 9), offset);
+    for (let corner = 0; corner < 3; corner++) {
+      const normalAt = ids[face * 3 + corner] * 3;
+      part.normals.set(normals.subarray(normalAt, normalAt + 3), offset + corner * 3);
+    }
     counts[label] += 9;
   }
   return result;

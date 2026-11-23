@@ -30,8 +30,8 @@
         <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
         <div id="layout-row">
           <label for="print-layout">3MF layout</label>
-          <select id="print-layout"><option value="objects">Separate objects</option><option value="assembly">Assembled parts</option><option value="paint">Painted surface</option></select>
-          <p>Separate objects give you individually movable solids. Choose Assembled parts to slice them together. For fused figurines, Painted surface keeps the original mesh.</p>
+          <select id="print-layout"><option value="paint" selected>Full detail</option><option value="objects">Separate objects</option><option value="assembly">Assembled parts</option></select>
+          <p>Full detail keeps the original mesh. Fused figurines export as one painted body. Separate objects and Assembled parts rebuild fused regions as smooth solids.</p>
         </div>
         <div class="fin-tools">
           <h2>Support fins</h2><p>Click an underside in the assembled view. Tall fins get wider feet and keep a narrow contact tip. Each fin uses its contact region’s color.</p>
@@ -59,6 +59,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.7"></script>
+  <script type="module" src="./app.js?v=0.3.8"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>

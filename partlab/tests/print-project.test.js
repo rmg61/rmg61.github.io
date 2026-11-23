@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPrintProject, defaultFilaments, makeSupportFin, orcaPaintCode } from '../print-project.js';
+import { buildRegionSolids } from '../region-solids.js';
 
 const faces = new Float32Array([
   0,0,0, 0,0,1, 0,1,0,
@@ -113,6 +114,17 @@ test('a common 3MF plate transform centers all parts without changing their spac
   assert.match(grouped.files['3D/3dmodel.model'], /<build><item objectid="4" transform="1 0 0 0 1 0 0 0 1 -6 -5 -8"/);
   assert.match(grouped.files['Metadata/model_settings.config'], /<part id="3" subtype="normal_part"><metadata key="name" value="Right"\/><metadata key="extruder" value="3"\/>/);
   assert.deepEqual(JSON.parse(grouped.files['Metadata/project_settings.config']).printable_area, ['-110x-90', '110x-90', '110x90', '-110x90']);
+});
+
+test('solid remeshing projects the slanted surface off the axis-aligned grid', () => {
+  const { bodies, pitch } = buildRegionSolids([{ name: 'Tetrahedron', positions: faces }], 4, [0, 0, 0]);
+  const candidates = bodies[0].vertices.filter(point => point.every(value => value > .5) &&
+    point.reduce((sum, value) => sum + value, 0) > 3.5);
+  assert.ok(candidates.length >= 5);
+  for (const point of candidates) {
+    const distance = Math.abs(4 - point.reduce((sum, value) => sum + value, 0));
+    assert.ok(distance < pitch * .25, `Off-plane vertex: ${point}`);
+  }
 });
 
 test('3MF colors remain possible beyond the Orca-specific paint codes', () => {

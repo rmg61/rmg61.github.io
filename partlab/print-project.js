@@ -1,4 +1,4 @@
-import { buildRegionSolids } from './region-solids.js?v=0.3.5';
+import { buildRegionSolids } from './region-solids.js?v=0.3.8';
 
 export const coreNS = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02';
 export const materialNS = 'http://schemas.microsoft.com/3dmanufacturing/material/2015/02';

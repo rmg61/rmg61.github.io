@@ -4,9 +4,9 @@ import { findFigurineParts, figurineTriangleLimit } from './figurine-parts.js';
 self.onmessage = async ({ data }) => {
   try {
     if (data.infer && data.sources.length === 1 && data.sources[0].discoveryProfile === 'ogre') {
-      const { splitOgreRegions } = await import('./ogre-regions.js?v=0.3.7');
+      const { splitOgreRegions } = await import('./ogre-regions.js?v=0.3.8');
       const parts = splitOgreRegions(data.sources[0].positions);
-      self.postMessage({ parts, segmentation: 'named' }, parts.map(part => part.positions.buffer));
+      self.postMessage({ parts, segmentation: 'named' }, parts.flatMap(part => [part.positions.buffer, part.normals.buffer]));
       return;
     }
     const parts = [];

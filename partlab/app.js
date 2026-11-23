@@ -4,7 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
-import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.7';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.8';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -36,7 +36,7 @@ function notice(message,error=false){$('notice').textContent=message;$('notice')
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
 function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/step-worker.js')?'classic':'module'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
 
-const analyzeParts = infer => workerJob('parts-worker.js?v=0.3.7', {
+const analyzeParts = infer => workerJob('parts-worker.js?v=0.3.8', {
   sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part), discoveryProfile: part.discoveryProfile })),
   infer
 });
@@ -128,7 +128,7 @@ async function loadFile(file){
       data = extract(root);
       disposeImported(root);
       if (data.length === 1 && buffer.byteLength === 59_980_584) {
-        const { matchesOgreSTL } = await import('./ogre-regions.js?v=0.3.7');
+        const { matchesOgreSTL } = await import('./ogre-regions.js?v=0.3.8');
         if (await matchesOgreSTL(buffer)) data[0].discoveryProfile = 'ogre';
       }
     }
@@ -410,7 +410,7 @@ async function makePrint3MF() {
   const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
   const layout = $('print-layout').value;
   const fused = parts.some(part => part.inferred || part.explosionOffset);
-  return workerJob('print-worker.js?v=0.3.7', {
+  return workerJob('print-worker.js?v=0.3.8', {
     name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
     scale, origin: printFrame.origin, fused, plate: printPlate(),
     separateRegions: layout !== 'paint',
@@ -466,7 +466,9 @@ async function exportModel() {
       const { bytes, warnings, objectCount, pitch, assembled, fitsPlate } = await makePrint3MF();
       payload = bytes;
       const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
-      const resolution = pitch ? ` Fused regions were remeshed at ${pitch.toFixed(2)} mm.` : '';
+      const painted = !pitch && parts.some(part => part.inferred || part.explosionOffset);
+      const resolution = pitch ? ` Fused regions were remeshed with a ${pitch.toFixed(2)} mm sampling grid and smoothed to the surface.` :
+        painted ? ' Original surface detail is preserved. Filament colors are painted on the mesh.' : '';
       const contents = assembled ? `one assembly with ${objectCount} colored parts` : `${objectCount} colored object${objectCount === 1 ? '' : 's'}`;
       const placement = fitsPlate ? ' Centered on the build plate.' : ' Centered, but the print exceeds the plate dimensions.';
       details = `3MF exported with ${contents}.${placement}${resolution} Preview the slice before printing.${topology}`;
