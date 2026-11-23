@@ -340,40 +340,83 @@ async function makePrint3MF() {
     scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset)
   });
 }
+const exportTypes = {
+  stl: { description: 'STL mesh', mime: 'model/stl' },
+  obj: { description: 'OBJ mesh', mime: 'model/obj' },
+  '3mf': { description: '3MF print project', mime: 'model/3mf' },
+  step: { description: 'Faceted STEP model', mime: 'application/step' }
+};
+
 async function exportModel() {
   if (busy || !parts.length) return;
-  setBusy(true, 'Preparing download…');
-  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const format = $('format').value;
+  const { description, mime } = exportTypes[format];
+  const extension = '.' + format;
+  const filename = (modelName.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]/gi, '_') || 'model') + extension;
+  const canChooseLocation = typeof window.showSaveFilePicker === 'function';
+  setBusy(true, canChooseLocation ? 'Choose where to save.' : 'Preparing download.');
+  $('format').disabled = true;
   try {
-    const format = $('format').value;
-    let payload, type = 'application/octet-stream', message = 'Model downloaded in original assembled coordinates.';
+    let destination;
+    if (canChooseLocation) {
+      try {
+        // Open the picker during the click, before building the file.
+        destination = await window.showSaveFilePicker({
+          id: 'partlab-export',
+          startIn: 'downloads',
+          suggestedName: filename,
+          types: [{ description, accept: { [mime]: [extension] } }]
+        });
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          notice('Save canceled.');
+          return;
+        }
+        if (error.name !== 'SecurityError' && error.name !== 'NotAllowedError') throw error;
+      }
+    }
+    $('busy-text').textContent = 'Preparing export.';
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let payload, details = 'Export uses the assembled model.';
     if (format === 'stl') payload = binarySTL(exportParts());
-    if (format === 'obj') { payload = objText(exportParts()); type = 'text/plain'; }
+    if (format === 'obj') payload = objText(exportParts());
     if (format === 'step') {
       const { parts: shells } = await analyzeParts(false);
       payload = stepText(shells);
-      type = 'application/step';
-      message = 'Faceted STEP downloaded.';
+      details = 'Faceted STEP export.';
     }
     if (format === '3mf') {
       const { bytes, warnings } = await makePrint3MF();
       payload = bytes;
-      type = 'model/3mf';
       const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
-      message = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}`;
+      details = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}`;
     }
-    const url = URL.createObjectURL(new Blob([payload], { type }));
+    const file = new Blob([payload], { type: mime });
+    if (destination) {
+      const stream = await destination.createWritable();
+      try {
+        await stream.write(file);
+        await stream.close();
+      } catch (error) {
+        await stream.abort().catch(() => {});
+        throw error;
+      }
+      notice(`Saved “${destination.name}” to the folder you chose. ${details}`);
+      return;
+    }
+    const url = URL.createObjectURL(file);
     const link = document.createElement('a');
     link.href = url;
-    link.download = (modelName.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]/gi, '_') || 'model') + '.' + format;
+    link.download = filename;
     document.body.append(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
-    notice(message);
+    notice(`Look for “${filename}” in your browser’s Downloads. ${details}`);
   } catch (error) {
     notice('Export failed: ' + error.message, true);
   } finally {
+    $('format').disabled = false;
     setBusy(false);
   }
 }

@@ -18,6 +18,10 @@ From this directory run `python -m http.server 8765 --bind 127.0.0.1`, then open
 - Limits: 80 MB file, 1.5 million triangles, 2,500 detected parts. Large geometry imports/exports may briefly stall the browser; STEP import and connectivity analysis use workers. 3MF ZIP metadata is checked against a 200 MB uncompressed limit before parsing.
 - The sample pump has seven source bodies. The sample astronaut starts as one connected surface with no part labels and is analyzed by the same worker as uploaded models.
 
+## Saving exports
+
+**Export** opens a Save As dialog in browsers that support local file saving. Choose a folder and filename on your computer. When the dialog is unavailable, use your browser’s Downloads list to find the export. To choose a folder for those downloads, enable the option to ask where to save each file in your browser’s download settings.
+
 ## Hosting
 
 Copy this directory to a folder such as `partlab/` in a GitHub Pages repository. Enable Pages from that branch in the repository Settings if it is not already enabled. Relative local paths and pinned CDN dependencies support project subpaths. No keys or accounts are needed to use the app.
