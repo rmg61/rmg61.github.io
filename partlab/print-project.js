@@ -62,7 +62,7 @@ function indexedBody(parts, scale, origin) {
   return { vertices, faces, open, irregular, removed };
 }
 
-export function buildPrintProject({ name, parts, fins = [], filaments, scale, origin, fused, separateRegions = true }) {
+export function buildPrintProject({ name, parts, fins = [], filaments, scale, origin, fused, separateRegions = true, groupObjects = false, plate }) {
   if (filaments.length > defaultFilaments.length) throw new Error(`Use at most ${defaultFilaments.length} filament slots.`);
   if (!filaments.length || filaments.some(color => !/^#[0-9a-f]{6}$/i.test(color))) throw new Error('Choose valid filament colors.');
   if (!parts.length) throw new Error('Open a model before exporting.');
@@ -70,6 +70,9 @@ export function buildPrintProject({ name, parts, fins = [], filaments, scale, or
     throw new Error('A region refers to a missing filament slot.');
   }
   if (!Number.isFinite(scale) || scale <= 0) throw new Error('Choose a positive print size.');
+  if (plate && ![plate.width, plate.depth].every(size => Number.isFinite(size) && size > 0)) {
+    throw new Error('Choose positive build plate dimensions.');
+  }
   const groups = fused && !separateRegions ? [{ name, parts }] : parts.map(part => ({ name: part.name, parts: [part] }));
   let pitch;
   if (fused && separateRegions) {
@@ -80,35 +83,78 @@ export function buildPrintProject({ name, parts, fins = [], filaments, scale, or
     const byRegion = new Map(regions.map((part, index) => [part, converted.bodies[index]]));
     for (const group of groups) group.body = byRegion.get(group.parts[0]);
   }
+  const modelCount = groups.length;
   for (const fin of fins) groups.push({ name: fin.name, parts: [fin] });
   const warnings = { open: 0, irregular: 0, removed: 0 };
   const palette = filaments.map(color => `<m:color color="${color.toUpperCase()}"/>`).join('');
   const resources = [`<m:colorgroup id="1">${palette}</m:colorgroup>`];
-  const items = [];
-  const config = [];
+  const partsConfig = [];
+  const objectsConfig = [];
+  const ids = [];
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  const modelMin = [...min], modelMax = [...max];
   for (const [index, group] of groups.entries()) {
     const body = group.body ?? indexedBody(group.parts, scale, origin);
     for (const key of Object.keys(warnings)) warnings[key] += body[key];
     const id = index + 2;
     const defaultSlot = group.parts[0].slot ?? 0;
-    const vertices = body.vertices.map(([x, y, z]) => `<vertex x="${number(x)}" y="${number(y)}" z="${number(z)}"/>`).join('');
+    const vertices = body.vertices.map(([x, y, z]) => {
+      if (plate) {
+        for (const [axis, raw] of [x, y, z].entries()) {
+          const value = Number(raw);
+          min[axis] = Math.min(min[axis], value);
+          max[axis] = Math.max(max[axis], value);
+          if (index < modelCount) {
+            modelMin[axis] = Math.min(modelMin[axis], value);
+            modelMax[axis] = Math.max(modelMax[axis], value);
+          }
+        }
+      }
+      return `<vertex x="${number(x)}" y="${number(y)}" z="${number(z)}"/>`;
+    }).join('');
     const faces = body.faces.map(({ corners: [a, b, c], slot }) => {
       const paint = group.parts.length > 1 ? orcaPaintCode(slot) : '';
       return `<triangle v1="${a}" v2="${b}" v3="${c}" pid="1" p1="${slot}" p2="${slot}" p3="${slot}"${paint ? ` paint_color="${paint}"` : ''}/>`;
     }).join('');
     resources.push(`<object id="${id}" type="model" name="${xml(group.name)}" pid="1" pindex="${defaultSlot}"><mesh><vertices>${vertices}</vertices><triangles>${faces}</triangles></mesh></object>`);
-    items.push(`<item objectid="${id}" printable="1"/>`);
+    ids.push(id);
     const metadata = `<metadata key="name" value="${xml(group.name)}"/><metadata key="extruder" value="${defaultSlot + 1}"/>`;
-    config.push(`<object id="${id}" auto_drop="0">${metadata}<part id="${id}" subtype="normal_part">${metadata}</part></object>`);
+    const part = `<part id="${id}" subtype="normal_part">${metadata}</part>`;
+    partsConfig.push(part);
+    objectsConfig.push(`<object id="${id}" auto_drop="0">${metadata}${part}</object>`);
   }
+  const assembled = groupObjects && ids.length > 1;
+  const rootId = groups.length + 2;
+  let config = objectsConfig.join('');
+  if (assembled) {
+    const components = ids.map(id => `<component objectid="${id}"/>`).join('');
+    resources.push(`<object id="${rootId}" type="model" name="${xml(name)}"><components>${components}</components></object>`);
+    const metadata = `<metadata key="name" value="${xml(name)}"/><metadata key="extruder" value="1"/>`;
+    config = `<object id="${rootId}" auto_drop="0">${metadata}${partsConfig.join('')}</object>`;
+  }
+  const settings = { filament_colour: filaments.map(color => color.toUpperCase()) };
+  let transform = '', fitsPlate;
+  if (plate) {
+    const half = [plate.width / 2, plate.depth / 2];
+    const center = plate.originAtCenter ? [0, 0] : half;
+    const plateMin = center.map((value, axis) => value - half[axis]);
+    const plateMax = center.map((value, axis) => value + half[axis]);
+    const offset = center.map((value, axis) => value - (modelMin[axis] + modelMax[axis]) / 2);
+    fitsPlate = offset.every((value, axis) => min[axis] + value >= plateMin[axis] - .00001 &&
+      max[axis] + value <= plateMax[axis] + .00001);
+    transform = ` transform="1 0 0 0 1 0 0 0 1 ${[...offset, -min[2]].map(number).join(' ')}"`;
+    const [left, front] = plateMin.map(number), [right, back] = plateMax.map(number);
+    settings.printable_area = [`${left}x${front}`, `${right}x${front}`, `${right}x${back}`, `${left}x${back}`];
+  }
+  const items = (assembled ? [rootId] : ids).map(id => `<item objectid="${id}"${transform} printable="1"/>`);
   return {
-    warnings, objectCount: groups.length, pitch,
+    warnings, objectCount: groups.length, pitch, assembled, fitsPlate,
     files: {
       '[Content_Types].xml': '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/><Default Extension="config" ContentType="application/octet-stream"/></Types>',
       '_rels/.rels': '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>',
       '3D/3dmodel.model': `<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="${coreNS}" xmlns:m="${materialNS}"><metadata name="Application">PartLab</metadata><resources>${resources.join('')}</resources><build>${items.join('')}</build></model>`,
-      'Metadata/model_settings.config': `<?xml version="1.0" encoding="UTF-8"?><config>${config.join('')}</config>`,
-      'Metadata/project_settings.config': JSON.stringify({ filament_colour: filaments.map(color => color.toUpperCase()) })
+      'Metadata/model_settings.config': `<?xml version="1.0" encoding="UTF-8"?><config>${config}</config>`,
+      'Metadata/project_settings.config': JSON.stringify(settings)
     }
   };
 }

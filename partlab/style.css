@@ -12,3 +12,5 @@
 #layout-row{margin-top:8px}
 #layout-row select{width:100%;margin-top:4px}
 @media(max-width:650px){.parts-panel{max-height:max(96px,55vh)}}
+.build-plate-fields{margin-top:8px}
+#plate-origin{width:100%}

@@ -76,6 +76,27 @@ test('separate fused regions are closed bodies with distinct build items and fil
   }
 });
 
+test('a common 3MF plate transform centers all parts without changing their spacing', () => {
+  const parts = [
+    { name: 'Left', positions: faces },
+    { name: 'Right', positions: faces.map((value, axis) => value + (axis % 3 === 0 ? 3 : 0)), slot: 2 }
+  ];
+  const makeProject = (originAtCenter, groupObjects = false) => buildPrintProject({
+    name: 'Test', parts, filaments: defaultFilaments, scale: 2, origin: [-1, -2, -4], groupObjects,
+    plate: { width: 220, depth: 180, originAtCenter }
+  });
+  const separate = makeProject(false);
+  assert.equal(separate.fitsPlate, true);
+  assert.deepEqual([...separate.files['3D/3dmodel.model'].matchAll(/<item [^>]*transform="([^"]+)"/g)].map(match => match[1]), [
+    '1 0 0 0 1 0 0 0 1 104 85 -8', '1 0 0 0 1 0 0 0 1 104 85 -8'
+  ]);
+  const grouped = makeProject(true, true);
+  assert.equal(grouped.assembled, true);
+  assert.match(grouped.files['3D/3dmodel.model'], /<build><item objectid="4" transform="1 0 0 0 1 0 0 0 1 -6 -5 -8"/);
+  assert.match(grouped.files['Metadata/model_settings.config'], /<part id="3" subtype="normal_part"><metadata key="name" value="Right"\/><metadata key="extruder" value="3"\/>/);
+  assert.deepEqual(JSON.parse(grouped.files['Metadata/project_settings.config']).printable_area, ['-110x-90', '110x-90', '110x90', '-110x90']);
+});
+
 test('3MF colors remain possible beyond the Orca-specific paint codes', () => {
   assert.equal(orcaPaintCode(0), '4');
   assert.equal(orcaPaintCode(1), '8');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PartLab — Model explorer</title>
-  <link rel="stylesheet" href="./style.css?v=0.3.5">
+  <link rel="stylesheet" href="./style.css?v=0.3.6">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","fflate":"https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"}}</script>
 </head>
 <body>
@@ -16,16 +16,22 @@
       <div><button class="text-button" id="figurine">Try the astronaut figurine</button> <span aria-hidden="true">·</span> <button class="text-button" id="demo">Try the pump</button></div>
       <section class="file-card" id="file-card" hidden><div class="eyebrow" id="file-kind">CURRENT MODEL</div><strong id="filename"></strong><div class="stats"><div><b id="triangles">—</b><span>triangles</span></div><div><b id="dimensions">—</b><span id="units-label">dimensions · mm assumed</span></div></div></section>
       <section class="action-card"><h2>Discover the parts</h2><p>Separate existing pieces or preview suggested regions on a one-piece figurine.</p><button id="explode" class="primary" disabled>✧ &nbsp; Explode into parts</button><label class="slider-label" for="spread">Part spacing <output id="spread-value">0%</output></label><input id="spread" type="range" min="0" max="180" value="0" disabled><button id="assemble" class="secondary" disabled>↩ &nbsp; Reassemble</button></section>
-      <details class="print-card" id="print-setup" hidden>
+      <details class="print-card" id="print-setup" open>
         <summary>Print setup</summary>
-        <label for="print-width">Largest model dimension (mm)</label><input id="print-width" type="number" min="1" max="5000" step="any" value="100">
+        <label for="print-width">Largest model dimension (mm)</label><input id="print-width" type="number" min="1" max="5000" step="any" value="100" disabled>
+        <div class="fin-fields build-plate-fields">
+          <label>Plate width (mm)<input id="plate-width" type="number" min="1" max="5000" step="any" value="220"></label>
+          <label>Plate depth (mm)<input id="plate-depth" type="number" min="1" max="5000" step="any" value="220"></label>
+        </div>
+        <label for="plate-origin">Plate coordinate origin</label>
+        <select id="plate-origin"><option value="corner">Front-left corner</option><option value="center">Center</option></select>
         <p>Edit any of the eight filament colors, then assign it in the Parts list. Unassigned parts use Filament 1 in the 3MF export.</p>
         <div id="filaments" class="filament-palette"></div>
         <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
-        <div id="layout-row" hidden>
+        <div id="layout-row">
           <label for="print-layout">3MF layout</label>
-          <select id="print-layout"><option value="objects">Separate objects</option><option value="paint">Painted surface</option></select>
-          <p>Separate objects remesh fused regions into solids. Painted surface keeps the original exterior mesh.</p>
+          <select id="print-layout"><option value="objects">Separate objects</option><option value="assembly">Assembled parts</option><option value="paint">Painted surface</option></select>
+          <p>Separate objects give you individually movable solids. Choose Assembled parts to slice them together. For fused figurines, Painted surface keeps the original mesh.</p>
         </div>
         <div class="fin-tools">
           <h2>Support fins</h2><p>Click an underside in the assembled view. Each fin uses the color of its contact region.</p>
@@ -35,7 +41,7 @@
             <label>Top gap (mm)<input id="fin-gap" type="number" min="0" max="1" step="0.05" value="0.25"></label>
             <label>Foot angle (°)<input id="fin-angle" type="number" min="-180" max="180" step="15" value="0"></label>
           </div>
-          <div class="print-buttons"><button id="add-fin" class="secondary" aria-pressed="false">Place fin</button><button id="undo-fin" class="secondary" disabled>Undo last</button></div>
+          <div class="print-buttons"><button id="add-fin" class="secondary" aria-pressed="false" disabled>Place fin</button><button id="undo-fin" class="secondary" disabled>Undo last</button></div>
           <p id="fin-count">No fins placed.</p>
           <a href="https://youtu.be/vnn4XeKQobs" target="_blank" rel="noopener noreferrer">Support fin design video</a>
         </div>
@@ -53,6 +59,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.3.5"></script>
+  <script type="module" src="./app.js?v=0.3.6"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>

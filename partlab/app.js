@@ -4,7 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
-import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.5';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.6';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -69,15 +69,19 @@ function displayParts(data,discovered=false){
   });
   const box=new THREE.Box3().setFromObject(model);const center=box.getCenter(new THREE.Vector3());const dims=box.getSize(new THREE.Vector3());span=Math.max(...dims.toArray(),.001);zoomMin=span*.005;zoomMax=span*200;
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
-  if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}grid=new THREE.GridHelper(span*3,24,0x425867,0x263541);grid.rotation.x=Math.PI/2;grid.position.set(center.x,center.y,box.min.z-span*.025);scene.add(grid);
   document.body.classList.add('has-model');target.copy(center);$('dimensions').textContent=dims.toArray().map(n=>n.toLocaleString(undefined,{maximumFractionDigits:1})).join(' × ');
-  printFrame = { origin: [center.x, center.y, box.min.z], center, span };
-  $('layout-row').hidden = !parts.some(part => part.inferred || part.explosionOffset);
-  if ($('print-setup').hidden) {
-    $('print-setup').hidden = false;
+  if (!printFrame) {
     $('print-width').value = parts[0]?.explosionOffset || span > 5000 ? 150 : Math.max(1, Number(span.toFixed(3)));
-    renderFilaments();
+    $('print-width').disabled = false;
+    $('add-fin').disabled = false;
   }
+  printFrame = { origin: [center.x, center.y, box.min.z], center, span };
+  if (!grid) {
+    grid = new THREE.GridHelper(1, 22, 0x587184, 0x334a59);
+    grid.rotation.x = Math.PI / 2;
+    scene.add(grid);
+  }
+  updateBuildPlate();
   $('triangles').textContent=parts.reduce((n,p)=>n+triangleCount(p),0).toLocaleString();$('empty').hidden=true;$('file-card').hidden=false;$('filename').textContent=modelName;$('model-badge').textContent=parts[0]?.explosionOffset?'NAMED REGIONS':parts.some(p=>p.inferred)?'SUGGESTED REGIONS':discovered?'PARTS DISCOVERED':'MODEL LOADED';renderPartList();fitView();
 }
 
@@ -91,7 +95,6 @@ function spreadParts() {
     if (part.explosionOffset) part.mesh.position.fromArray(part.explosionOffset).multiplyScalar(amount);
     else part.mesh.position.copy(part.direction).multiplyScalar(span * .6 * amount);
   }
-  if (grid) grid.position.z = new THREE.Box3().setFromObject(model).min.z - span * .025;
 }
 function renderPartList(){
   $('parts').replaceChildren();$('part-count').textContent=isDiscovered?parts.length:0;$('show-all').hidden=!isDiscovered;$('isolate-part').hidden=!isDiscovered;$('isolate-part').disabled=selected<0;$('parts-hint').textContent=isDiscovered?'Click to select · Hide to inspect inside.':'Run discovery to identify geometric pieces.';
@@ -259,18 +262,42 @@ function updatePrintColors() {
 
 function resetPrintSetup() {
   while (fins.length) removeLastFin();
-  filaments = [...defaultFilaments];
+  if (parts.length) {
+    filaments = [...defaultFilaments];
+    renderFilaments();
+  }
   showPrintColors = false;
   updatePrintColors();
   setFinMode(false);
-  $('print-layout').value = 'objects';
-  $('print-setup').hidden = true;
+  printFrame = undefined;
 }
 
 function printScale() {
   const field = $('print-width');
   if (!field.checkValidity() || !(field.valueAsNumber > 0)) throw new Error('Enter a model dimension from 1 to 5,000 mm.');
   return field.valueAsNumber / printFrame.span;
+}
+
+function printPlate() {
+  const width = $('plate-width');
+  const depth = $('plate-depth');
+  if (![width, depth].every(field => field.checkValidity() && field.valueAsNumber > 0)) {
+    throw new Error('Enter a build plate width and depth between 1 and 5,000 mm.');
+  }
+  return { width: width.valueAsNumber, depth: depth.valueAsNumber, originAtCenter: $('plate-origin').value === 'center' };
+}
+
+function updateBuildPlate() {
+  if (!printFrame || !grid) return;
+  try {
+    const { width, depth } = printPlate();
+    const scale = printScale();
+    const [x, y, z] = printFrame.origin;
+    grid.scale.set(width / scale, 1, depth / scale);
+    grid.position.set(x, y, z - .05 / scale);
+  } catch {
+    // Keep the last valid plate while a numeric field is being edited.
+  }
 }
 
 function setFinMode(active) {
@@ -338,10 +365,13 @@ async function makePrint3MF() {
   const scale = printScale();
   const fileParts = parts.map(({ name, positions, indices, slot, inferred, explosionOffset }) => ({ name, positions, indices, slot, inferred, explosionOffset }));
   const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
-  return workerJob('print-worker.js?v=0.3.5', {
+  const layout = $('print-layout').value;
+  const fused = parts.some(part => part.inferred || part.explosionOffset);
+  return workerJob('print-worker.js?v=0.3.6', {
     name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
-    scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset),
-    separateRegions: $('print-layout').value === 'objects'
+    scale, origin: printFrame.origin, fused, plate: printPlate(),
+    separateRegions: layout !== 'paint',
+    groupObjects: layout === 'assembly' || (fused && layout === 'paint')
   });
 }
 const exportTypes = {
@@ -390,11 +420,13 @@ async function exportModel() {
       details = 'Faceted STEP export.';
     }
     if (format === '3mf') {
-      const { bytes, warnings, objectCount, pitch } = await makePrint3MF();
+      const { bytes, warnings, objectCount, pitch, assembled, fitsPlate } = await makePrint3MF();
       payload = bytes;
       const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
       const resolution = pitch ? ` Fused regions were remeshed at ${pitch.toFixed(2)} mm.` : '';
-      details = `3MF exported with ${objectCount} object${objectCount === 1 ? '' : 's'} and filament assignments.${resolution} Preview the slice before printing.${topology}`;
+      const contents = assembled ? `one assembly with ${objectCount} colored parts` : `${objectCount} colored object${objectCount === 1 ? '' : 's'}`;
+      const placement = fitsPlate ? ' Centered on the build plate.' : ' Centered, but the print exceeds the plate dimensions.';
+      details = `3MF exported with ${contents}.${placement}${resolution} Preview the slice before printing.${topology}`;
     }
     const file = new Blob([payload], { type: mime });
     if (destination) {
@@ -551,4 +583,6 @@ document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>fitView(b.data
 window.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='f'&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))fitView();});
 let dragDepth=0;window.addEventListener('dragenter',e=>{e.preventDefault();dragDepth++;document.body.classList.add('dragging');});window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('dragleave',e=>{if(--dragDepth<=0)document.body.classList.remove('dragging');});window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;document.body.classList.remove('dragging');if(e.dataTransfer.files.length!==1){notice('Please load one model at a time.',true);return;}loadFile(e.dataTransfer.files[0]);});
 window.addEventListener('beforeunload',()=>{activeWorker?.terminate();workerReject?.(new Error('Cancelled'));});
+for (const id of ['print-width', 'plate-width', 'plate-depth']) $(id).addEventListener('input', updateBuildPlate);
+renderFilaments();
 window.partlabReady=true;
