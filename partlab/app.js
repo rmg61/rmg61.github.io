@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
-import {zipSync,strToU8} from 'fflate';
-import {bounds,binarySTL,objText,meshXML,stepText} from './geometry.js?v=0.1.2';
+import {bounds,binarySTL,objText,stepText} from './geometry.js?v=0.1.2';
 import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
+import { defaultFilaments, makeSupportFin } from './print-project.js?v=0.3.0';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -19,13 +19,17 @@ scene.add(new THREE.HemisphereLight(0xd8ecff,0x53605b,2.5));
 const key=new THREE.DirectionalLight(0xffffff,3);key.position.set(70,-70,160);scene.add(key);
 const fill=new THREE.DirectionalLight(0xa6caff,1.7);fill.position.set(-100,80,60);scene.add(fill);
 const model=new THREE.Group();scene.add(model);let grid;
+const finGroup = new THREE.Group();
+scene.add(finGroup);
+const fins = [];
+let filaments = [...defaultFilaments], showPrintColors = false, placingFin = false, printFrame;
 const target=new THREE.Vector3(),raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
 let sources=[],parts=[],isDiscovered=false,selected=-1,modelName='',span=100,busy=false,drag=null,zoomMin=.01,zoomMax=1e7;
 let activeWorker=null,workerReject=null;
 
 function notice(message,error=false){$('notice').textContent=message;$('notice').classList.toggle('error',error);}
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
-function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/parts-worker.js')?'module':'classic'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
+function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/step-worker.js')?'classic':'module'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
 
 const analyzeParts = infer => workerJob('parts-worker.js?v=0.2.0', {
   sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part) })),
@@ -55,18 +59,26 @@ function displayParts(data,discovered=false){
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.partIndex = index;
     model.add(mesh);
-    return { ...part, mesh, color, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
+    return { ...part, mesh, color, slot: part.slot ?? 0, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
   });
   const box=new THREE.Box3().setFromObject(model);const center=box.getCenter(new THREE.Vector3());const dims=box.getSize(new THREE.Vector3());span=Math.max(...dims.toArray(),.001);zoomMin=span*.005;zoomMax=span*200;
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
   if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}grid=new THREE.GridHelper(span*3,24,0x425867,0x263541);grid.rotation.x=Math.PI/2;grid.position.set(center.x,center.y,box.min.z-span*.025);scene.add(grid);
   document.body.classList.add('has-model');target.copy(center);$('dimensions').textContent=dims.toArray().map(n=>n.toLocaleString(undefined,{maximumFractionDigits:1})).join(' × ');
+  printFrame = { origin: [center.x, center.y, box.min.z], center, span };
+  if ($('print-setup').hidden) {
+    $('print-setup').hidden = false;
+    $('print-width').value = parts[0]?.explosionOffset || span > 5000 ? 150 : Math.max(1, Number(span.toFixed(3)));
+    renderFilaments();
+  }
   $('triangles').textContent=parts.reduce((n,p)=>n+triangleCount(p),0).toLocaleString();$('empty').hidden=true;$('file-card').hidden=false;$('filename').textContent=modelName;$('model-badge').textContent=parts[0]?.explosionOffset?'NAMED REGIONS':parts.some(p=>p.inferred)?'SUGGESTED REGIONS':discovered?'PARTS DISCOVERED':'MODEL LOADED';renderPartList();fitView();
 }
 
 function fitView(view){if(!parts.length){camera.lookAt(target);return;}const box=new THREE.Box3().setFromObject(model),center=box.getCenter(new THREE.Vector3()),radius=box.getSize(new THREE.Vector3()).length()/2;let dir=camera.position.clone().sub(target).normalize();if(view==='iso')dir.set(1,-1.35,.95).normalize();if(view==='front')dir.set(0,-1,0);if(view==='top')dir.set(0,-.00001,1).normalize();if(view==='right')dir.set(1,0,0);const fov=Math.min(camera.fov*Math.PI/180,2*Math.atan(Math.tan(camera.fov*Math.PI/360)*camera.aspect));const distance=radius/Math.sin(fov/2)*1.2;target.copy(center);camera.position.copy(center).addScaledVector(dir,Math.max(distance,.01));camera.near=Math.max(span/10000,.000001);camera.far=Math.max(distance*100,span*1000);camera.updateProjectionMatrix();camera.lookAt(target);}
 function spreadParts() {
   const amount = Number($('spread').value) / 100;
+  if (amount && placingFin) setFinMode(false);
+  finGroup.visible = amount === 0;
   $('spread-value').value = Math.round(amount * 100) + '%';
   for (const part of parts) {
     if (part.explosionOffset) part.mesh.position.fromArray(part.explosionOffset).multiplyScalar(amount);
@@ -76,8 +88,7 @@ function spreadParts() {
 }
 function renderPartList(){
   $('parts').replaceChildren();$('part-count').textContent=isDiscovered?parts.length:0;$('show-all').hidden=!isDiscovered;$('isolate-part').hidden=!isDiscovered;$('isolate-part').disabled=selected<0;$('parts-hint').textContent=isDiscovered?'Click to select · Hide to inspect inside.':'Run discovery to identify geometric pieces.';
-  if(!isDiscovered){const div=document.createElement('div');div.className='parts-empty';div.textContent='Model ready. Discover its parts to begin exploring.';$('parts').append(div);return;}
-  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;choose.setAttribute('aria-pressed',String(selected===i));const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=triangleCount(p).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye);$('parts').append(card);});
+  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=showPrintColors?filaments[p.slot]:p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;choose.setAttribute('aria-pressed',String(selected===i));const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=triangleCount(p).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye,filamentSelect(p));$('parts').append(card);});
 }
 function selectPart(i){selected=i;parts.forEach((p,k)=>{p.mesh.material.emissive.set(k===i?'#264d40':'#000000');p.mesh.material.emissiveIntensity=k===i?.8:0;});renderPartList();}
 
@@ -90,6 +101,7 @@ async function loadFile(file){
   try{const buffer=await file.arrayBuffer();let data;
     if (ext === 'glb') {
       data = readRegionGLB(buffer);
+      resetPrintSetup();
       sources = data;
       modelName = file.name;
       displayParts(data, true);
@@ -103,7 +115,7 @@ async function loadFile(file){
     else if(ext==='3mf'){// Check expanded package sizes before ThreeMFLoader decompresses the archive.
       checkZipSize(buffer);const root=new ThreeMFLoader().parse(buffer);data=extract(root);disposeImported(root);
     }else ({ parts: data } = await workerJob('step-worker.js', buffer, [buffer]));
-    validate(data);sources=data;modelName=file.name;displayParts(sources);$('file-kind').textContent=ext.toUpperCase()+' MODEL';$('units-label').textContent=['stl','obj'].includes(ext)?'dimensions · mm assumed':'dimensions · mm';notice('Model loaded. Select “Explode into parts” to find its separate geometric pieces.');
+    validate(data);resetPrintSetup();sources=data;modelName=file.name;displayParts(sources);$('file-kind').textContent=ext.toUpperCase()+' MODEL';$('units-label').textContent=['stl','obj'].includes(ext)?'dimensions · mm assumed':'dimensions · mm';notice('Model loaded. Select “Explode into parts” to find its separate geometric pieces.');
   }catch(e){notice('Could not open model: '+e.message,true);}finally{setBusy(false);$('file').value='';}
 }
 function disposeImported(root){root.traverse(o=>{o.geometry?.dispose();if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());});}
@@ -117,10 +129,23 @@ async function discover() {
     showPreparedExplosion();
     return;
   }
+  if (isDiscovered) {
+    $('spread').value = parts.some(part => part.inferred) ? 40 : parts.length > 1 ? 70 : 0;
+    spreadParts();
+    fitView();
+    return;
+  }
+  if (fins.length) {
+    notice('Undo the placed fins before discovering new parts. Place them again after discovery so each fin follows the correct color.', true);
+    return;
+  }
   setBusy(true, 'Analyzing the model…');
   try {
     const result = await analyzeParts(true);
-    displayParts(result.parts, true);
+    const assigned = new Map(parts.map(part => [part.name, part.slot]));
+    const oneSlot = parts.length === 1 ? parts[0].slot : 0;
+    displayParts(result.parts.map(part => ({ ...part, slot: assigned.get(part.name) ?? oneSlot })), true);
+    updatePrintColors();
     $('spread').value = result.segmentation === 'figurine' ? 40 : parts.length > 1 ? 70 : 0;
     spreadParts();
     fitView();
@@ -149,7 +174,7 @@ function showPreparedExplosion(useFront = false) {
 
 function demo(){if(busy)return;const root=new THREE.Group();const add=(g,name,x,y,z)=>{const mesh=new THREE.Mesh(g);mesh.name=name;mesh.position.set(x,y,z);root.add(mesh);};
   add(new THREE.BoxGeometry(92,64,8),'Mounting base',0,0,0);add(new THREE.BoxGeometry(64,46,35),'Housing',0,0,24);add(new THREE.BoxGeometry(70,52,7),'Top cover',0,0,46);add(new THREE.CylinderGeometry(8,8,11,24),'Left fastener',-23,-16,55);root.children.at(-1).rotation.x=Math.PI/2;add(new THREE.CylinderGeometry(8,8,11,24),'Right fastener',23,16,55);root.children.at(-1).rotation.x=Math.PI/2;add(new THREE.CylinderGeometry(13,13,26,36),'Inlet',-45,0,25);root.children.at(-1).rotation.z=Math.PI/2;add(new THREE.CylinderGeometry(10,10,25,36),'Outlet',0,-33,25);
-  sources=extract(root);disposeImported(root);modelName='Sample pump assembly';displayParts(sources);$('file-kind').textContent='SAMPLE · 7 SOURCE BODIES';$('units-label').textContent='dimensions · mm';setBusy(false);notice('Sample assembly loaded. Try “Explode into parts” to separate its seven bodies.');
+  resetPrintSetup();sources=extract(root);disposeImported(root);modelName='Sample pump assembly';displayParts(sources);$('file-kind').textContent='SAMPLE · 7 SOURCE BODIES';$('units-label').textContent='dimensions · mm';setBusy(false);notice('Sample assembly loaded. Try “Explode into parts” to separate its seven bodies.');
 }
 
 async function loadFigurine() {
@@ -157,6 +182,7 @@ async function loadFigurine() {
   setBusy(true, 'Building the figurine…');
   try {
     const { makeFigurine } = await import('./figurine-sample.js?v=0.2.0');
+    resetPrintSetup();
     sources = [{ name: 'Astronaut', positions: makeFigurine() }];
     modelName = 'Sample astronaut figurine';
     displayParts(sources);
@@ -176,11 +202,175 @@ function exportParts() {
   const exportGeometry = parts.some(part => part.inferred) ? sources : parts;
   return exportGeometry.map(part => ({ name: part.name, positions: trianglePositions(part) }));
 }
-async function exportModel(){if(busy||!parts.length)return;setBusy(true,'Preparing download…');await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));try{const format=$('format').value,data=exportParts();let payload,type='application/octet-stream';if(format==='stl')payload=binarySTL(data);if(format==='obj'){payload=objText(data);type='text/plain';}if(format==='step'){// Split shells even if discovery has not been run.
-      const { parts: shells } = await analyzeParts(false);payload=stepText(shells);type='application/step';
-    }if(format==='3mf'){payload=zipSync({'[Content_Types].xml':strToU8('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>'),'_rels/.rels':strToU8('<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>'),'3D/3dmodel.model':strToU8(meshXML(data))});type='model/3mf';}
-    const blob=new Blob([payload],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=(modelName.replace(/\.[^.]+$/,'').replace(/[^a-z0-9_-]/gi,'_')||'model')+'.'+format;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);notice(format==='step'?'Faceted STEP downloaded. Triangle faces are preserved; curved CAD surfaces and feature history are not reconstructed.':'Model downloaded in its original assembled coordinates. Hidden parts are included; spacing is a viewing aid.');
-  }catch(e){notice('Export failed: '+e.message,true);}finally{setBusy(false);}}
+
+function renderFilaments() {
+  const list = $('filaments');
+  list.replaceChildren();
+  filaments.forEach((color, slot) => {
+    const label = document.createElement('label');
+    label.textContent = `${slot + 1}`;
+    const picker = document.createElement('input');
+    picker.type = 'color';
+    picker.value = color;
+    picker.setAttribute('aria-label', `Filament ${slot + 1} color`);
+    picker.oninput = () => {
+      filaments[slot] = picker.value;
+      showPrintColors = true;
+      updatePrintColors();
+    };
+    label.append(picker);
+    list.append(label);
+  });
+}
+
+function filamentSelect(part) {
+  const select = document.createElement('select');
+  select.className = 'filament-slot';
+  select.setAttribute('aria-label', `Filament slot for ${part.name}`);
+  filaments.forEach((_, slot) => select.add(new Option(`Filament ${slot + 1}`, String(slot))));
+  select.value = String(part.slot);
+  select.onchange = () => {
+    part.slot = Number(select.value);
+    showPrintColors = true;
+    updatePrintColors();
+  };
+  return select;
+}
+
+function updatePrintColors() {
+  $('paint-view').setAttribute('aria-pressed', String(showPrintColors));
+  $('paint-view').textContent = showPrintColors ? 'Show region colors' : 'Show print colors';
+  const swatches = $('parts').querySelectorAll('.part-color');
+  parts.forEach((part, index) => {
+    part.mesh.material.color.set(showPrintColors ? filaments[part.slot] : isDiscovered ? part.color : '#a1bbca');
+    if (swatches[index]) swatches[index].style.background = showPrintColors ? filaments[part.slot] : part.color;
+  });
+  for (const fin of fins) fin.mesh.material.color.set(showPrintColors ? filaments[fin.part.slot] : '#cb8e54');
+}
+
+function resetPrintSetup() {
+  while (fins.length) removeLastFin();
+  filaments = [...defaultFilaments];
+  showPrintColors = false;
+  updatePrintColors();
+  setFinMode(false);
+  $('print-setup').hidden = true;
+}
+
+function printScale() {
+  const field = $('print-width');
+  if (!field.checkValidity() || !(field.valueAsNumber > 0)) throw new Error('Enter a model dimension from 1 to 5,000 mm.');
+  return field.valueAsNumber / printFrame.span;
+}
+
+function setFinMode(active) {
+  placingFin = active;
+  document.body.classList.toggle('placing-fin', active);
+  $('add-fin').setAttribute('aria-pressed', String(active));
+  $('add-fin').textContent = active ? 'Done placing' : 'Place fin';
+}
+
+function removeLastFin() {
+  const fin = fins.pop();
+  if (fin) {
+    finGroup.remove(fin.mesh);
+    fin.mesh.geometry.dispose();
+    fin.mesh.material.dispose();
+  }
+  $('undo-fin').disabled = !fins.length;
+  $('print-width').disabled = fins.length > 0;
+  $('fin-count').textContent = fins.length ? `${fins.length} placed` : 'No fins placed.';
+}
+
+function placeSupport(hit) {
+  try {
+    const normal = hit?.face?.normal?.clone().transformDirection(hit.object.matrixWorld);
+    if (!normal || normal.z > -.15) throw new Error('Click a downward-facing surface. Orbit below the part to find the underside.');
+    const part = parts[hit.object.userData.partIndex];
+    const scale = printScale();
+    const anchor = hit.point.toArray();
+    const bed = printFrame.origin[2];
+    const settings = ['fin-foot','fin-thickness','fin-gap','fin-angle'].map(id => {
+      const field = $(id);
+      if (!field.checkValidity() || !Number.isFinite(field.valueAsNumber)) throw new Error('Enter valid fin dimensions and angle.');
+      return field.valueAsNumber;
+    });
+    const [footprint, thickness, gap, angleDegrees] = settings;
+    const angle = Math.atan2(anchor[1] - printFrame.center.y, anchor[0] - printFrame.center.x) + THREE.MathUtils.degToRad(angleDegrees);
+    const data = makeSupportFin({ anchor, bed, scale, angle, footprint, thickness, gap });
+    const usableMeshes = parts.map(candidate => candidate.mesh);
+    const probe = new THREE.Raycaster();
+    const sampleZ = Math.max(bed, anchor[2] - (gap + 1.5) / scale);
+    // Check several columns along the fin web. Final contact and toolpaths can be inspected in the slicer.
+    for (const distance of [1, (footprint + 1.5) / 2, footprint - .65]) {
+      for (const side of [-thickness / 2, 0, thickness / 2]) {
+        const x = anchor[0] + (Math.cos(angle) * distance - Math.sin(angle) * side) / scale;
+        const y = anchor[1] + (Math.sin(angle) * distance + Math.cos(angle) * side) / scale;
+        probe.set(new THREE.Vector3(x, y, bed - .2 / scale), new THREE.Vector3(0, 0, 1));
+        const near = probe.intersectObjects(usableMeshes)[0];
+        if (near && near.point.z < sampleZ) throw new Error('The fin path crosses the model. Change its foot angle or choose another underside.');
+      }
+    }
+    const mesh = new THREE.Mesh(geometryFromPart(data), new THREE.MeshStandardMaterial({ color: '#cb8e54', roughness: .8, side: THREE.DoubleSide }));
+    finGroup.add(mesh);
+    fins.push({ ...data, name: `Support fin ${fins.length + 1}`, part, mesh });
+    $('undo-fin').disabled = false;
+    $('print-width').disabled = true;
+    $('fin-count').textContent = `${fins.length} placed`;
+    updatePrintColors();
+    notice(`Fin ${fins.length} placed under ${part.name}. Click another underside or choose Done placing.`);
+  } catch (error) {
+    notice(error.message, true);
+  }
+}
+
+async function makePrint3MF() {
+  const scale = printScale();
+  const fileParts = parts.map(({ name, positions, indices, slot }) => ({ name, positions, indices, slot }));
+  const fileFins = fins.map(({ name, positions, indices, part }) => ({ name, positions, indices, slot: part.slot }));
+  return workerJob('print-worker.js?v=0.3.0', {
+    name: modelName.replace(/\.[^.]+$/, ''), parts: fileParts, fins: fileFins, filaments,
+    scale, origin: printFrame.origin, fused: parts.some(part => part.inferred || part.explosionOffset)
+  });
+}
+async function exportModel() {
+  if (busy || !parts.length) return;
+  setBusy(true, 'Preparing download…');
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try {
+    const format = $('format').value;
+    let payload, type = 'application/octet-stream', message = 'Model downloaded in original assembled coordinates.';
+    if (format === 'stl') payload = binarySTL(exportParts());
+    if (format === 'obj') { payload = objText(exportParts()); type = 'text/plain'; }
+    if (format === 'step') {
+      const { parts: shells } = await analyzeParts(false);
+      payload = stepText(shells);
+      type = 'application/step';
+      message = 'Faceted STEP downloaded.';
+    }
+    if (format === '3mf') {
+      const { bytes, warnings } = await makePrint3MF();
+      payload = bytes;
+      type = 'model/3mf';
+      const topology = warnings.open || warnings.irregular ? ` Mesh needs a slicer check: ${warnings.open.toLocaleString()} open edges and ${warnings.irregular.toLocaleString()} irregular edges.` : '';
+      const capacity = filaments.length > 32 ? ' Slots above 32 use standard 3MF colors only.' : '';
+      message = `3MF exported with filament colors and ${fins.length} support fin${fins.length === 1 ? '' : 's'}. Match filament slots and preview the slice.${topology}${capacity}`;
+    }
+    const url = URL.createObjectURL(new Blob([payload], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = (modelName.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]/gi, '_') || 'model') + '.' + format;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    notice(message);
+  } catch (error) {
+    notice('Export failed: ' + error.message, true);
+  } finally {
+    setBusy(false);
+  }
+}
 
 // A short left click selects a part. A drag can start anywhere in the canvas.
 const canvas = renderer.domElement;
@@ -239,13 +429,14 @@ canvas.addEventListener('pointerup', event => {
   const movement = Math.hypot(event.clientX - drag.x, event.clientY - drag.y);
   const shouldSelect = drag.button === 0 && !drag.moved && movement < orbitDragThreshold;
   drag = null;
-  if (!shouldSelect || !isDiscovered) return;
+  if (!shouldSelect || (!isDiscovered && !placingFin)) return;
 
   const rect = canvas.getBoundingClientRect();
   pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2);
   raycaster.setFromCamera(pointer, camera);
   const visibleMeshes = parts.filter(part => part.mesh.visible).map(part => part.mesh);
   const [hit] = raycaster.intersectObjects(visibleMeshes);
+  if (placingFin) { placeSupport(hit); return; }
   selectPart(hit?.object.userData.partIndex ?? -1);
 });
 
@@ -261,6 +452,35 @@ $('file').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.f
 $('isolate-part').onclick = () => {
   parts.forEach((part, index) => { part.mesh.visible = index === selected; });
   renderPartList();
+};
+$('add-filament').onclick = () => {
+  filaments.push(defaultFilaments[filaments.length % defaultFilaments.length]);
+  renderFilaments();
+  renderPartList();
+  $('filaments').lastElementChild.firstElementChild.focus();
+};
+$('slot-each').onclick = () => {
+  if (!parts.length) return;
+  filaments = parts.map(part => '#' + new THREE.Color(part.color).getHexString());
+  parts.forEach((part, index) => { part.slot = index; });
+  showPrintColors = true;
+  renderFilaments();
+  renderPartList();
+  updatePrintColors();
+  notice(`${filaments.length} separate filament slots assigned. Edit each color in Print setup.`);
+};
+$('paint-view').onclick = () => { showPrintColors = !showPrintColors; updatePrintColors(); };
+$('undo-fin').onclick = removeLastFin;
+$('add-fin').onclick = () => {
+  if (placingFin) { setFinMode(false); notice(`${fins.length} support fins in the assembled view.`); return; }
+  if (!parts.length || busy) return;
+  $('spread').value = 0;
+  parts.forEach(part => { part.mesh.visible = true; });
+  renderPartList();
+  spreadParts();
+  fitView();
+  setFinMode(true);
+  notice('Fin placement active. Orbit below the model and click a downward-facing surface.');
 };
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>fitView(b.dataset.view));
 window.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='f'&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))fitView();});

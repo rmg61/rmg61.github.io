@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PartLab — Model explorer</title>
-  <link rel="stylesheet" href="./style.css?v=0.1.2">
+  <link rel="stylesheet" href="./style.css?v=0.3.0">
   <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","fflate":"https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"}}</script>
 </head>
 <body>
@@ -16,6 +16,26 @@
       <div><button class="text-button" id="figurine">Try the astronaut figurine</button> <span aria-hidden="true">·</span> <button class="text-button" id="demo">Try the pump</button></div>
       <section class="file-card" id="file-card" hidden><div class="eyebrow" id="file-kind">CURRENT MODEL</div><strong id="filename"></strong><div class="stats"><div><b id="triangles">—</b><span>triangles</span></div><div><b id="dimensions">—</b><span id="units-label">dimensions · mm assumed</span></div></div></section>
       <section class="action-card"><h2>Discover the parts</h2><p>Separate existing pieces or preview suggested regions on a one-piece figurine.</p><button id="explode" class="primary" disabled>✧ &nbsp; Explode into parts</button><label class="slider-label" for="spread">Part spacing <output id="spread-value">0%</output></label><input id="spread" type="range" min="0" max="180" value="0" disabled><button id="assemble" class="secondary" disabled>↩ &nbsp; Reassemble</button></section>
+      <details class="print-card" id="print-setup" hidden>
+        <summary>Print setup</summary>
+        <label for="print-width">Largest model dimension (mm)</label><input id="print-width" type="number" min="1" max="5000" step="any" value="100">
+        <p>Set a filament slot for each part in the parts list.</p>
+        <div id="filaments" class="filament-palette"></div>
+        <div class="print-buttons"><button id="add-filament" class="secondary">+ Filament slot</button><button id="slot-each" class="secondary">One slot per part</button></div>
+        <button id="paint-view" class="secondary" type="button" aria-pressed="false">Show print colors</button>
+        <div class="fin-tools">
+          <h2>Support fins</h2><p>Click an underside in the assembled view. Each fin uses the color of its contact region.</p>
+          <div class="fin-fields">
+            <label>Foot (mm)<input id="fin-foot" type="number" min="5" max="35" step="1" value="12"></label>
+            <label>Thickness (mm)<input id="fin-thickness" type="number" min="0.4" max="4" step="0.1" value="1.2"></label>
+            <label>Top gap (mm)<input id="fin-gap" type="number" min="0" max="1" step="0.05" value="0.25"></label>
+            <label>Foot angle (°)<input id="fin-angle" type="number" min="-180" max="180" step="15" value="0"></label>
+          </div>
+          <div class="print-buttons"><button id="add-fin" class="secondary" aria-pressed="false">Place fin</button><button id="undo-fin" class="secondary" disabled>Undo last</button></div>
+          <p id="fin-count">No fins placed.</p>
+          <a href="https://youtu.be/vnn4XeKQobs" target="_blank" rel="noopener noreferrer">Support fin design video</a>
+        </div>
+      </details>
       <details class="method"><summary>How are parts identified?</summary><p>PartLab first finds existing bodies and disconnected mesh pieces. If it finds one connected piece, it looks for the neck and gaps between arms, legs, and torso in a roughly upright figurine.</p><p>Suggested regions are a preview. Exports use the assembled model. Mesh formats without units are treated as millimeters.</p></details>
       <div class="sidebar-foot">One model. A different perspective.</div>
     </aside>
@@ -28,6 +48,6 @@
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.2.1"></script>
+  <script type="module" src="./app.js?v=0.3.0"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>
