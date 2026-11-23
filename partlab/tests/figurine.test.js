@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { Worker } from 'node:worker_threads';
 import { bounds, splitConnected } from '../geometry.js';
 import { makeFigurine } from '../figurine-sample.js';
 import { findFigurineParts } from '../figurine-parts.js';
@@ -18,6 +20,29 @@ test('a one-piece figurine yields six connected regions with every triangle acco
     for (let i = 0; i < positions.length; i += 9) assert.ok(sourceTriangles.delete(String(positions.subarray(i, i + 9))));
   }
   assert.equal(sourceTriangles.size, 0);
+});
+
+test('discovery splits a dominant figurine and retains detached fragments', async (t) => {
+  const workerModule = new URL('../parts-worker.js', import.meta.url);
+  const bridge = `
+    import { parentPort } from 'node:worker_threads';
+    globalThis.self = { postMessage: (...args) => parentPort.postMessage(...args) };
+    await import(${JSON.stringify(workerModule.href)});
+    parentPort.on('message', data => self.onmessage({ data }));
+  `;
+  const worker = new Worker(new URL('data:text/javascript,' + encodeURIComponent(bridge)));
+  t.after(() => worker.terminate());
+  const fragment = new Float32Array([10, 10, 10, 11, 10, 10, 10, 11, 10]);
+  const positions = new Float32Array(figurine.length + fragment.length);
+  positions.set(figurine);
+  positions.set(fragment, figurine.length);
+  const response = once(worker, 'message');
+  worker.postMessage({ sources: [{ name: 'Figurine', positions }], infer: true });
+  const [result] = await response;
+  assert.equal(result.segmentation, 'figurine');
+  assert.equal(result.parts.filter(part => part.inferred).length, 6);
+  assert.deepEqual(result.parts.at(-1).positions, fragment);
+  assert.equal(result.parts.reduce((total, part) => total + part.positions.length, 0), positions.length);
 });
 
 test('landmarks follow a rotated and translated figurine that is Y-up', () => {

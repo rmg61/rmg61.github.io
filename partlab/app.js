@@ -31,7 +31,7 @@ function notice(message,error=false){$('notice').textContent=message;$('notice')
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
 function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/step-worker.js')?'classic':'module'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
 
-const analyzeParts = infer => workerJob('parts-worker.js?v=0.2.0', {
+const analyzeParts = infer => workerJob('parts-worker.js?v=0.3.2', {
   sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part) })),
   infer
 });
@@ -149,12 +149,14 @@ async function discover() {
     $('spread').value = result.segmentation === 'figurine' ? 40 : parts.length > 1 ? 70 : 0;
     spreadParts();
     fitView();
+    const fragments = parts.filter(part => !part.inferred).length - (result.segmentation === 'figurine' ? 0 : 1);
+    const fragmentsText = fragments > 0 ? ` and ${fragments.toLocaleString()} small disconnected fragment${fragments === 1 ? '' : 's'}` : '';
     if (result.segmentation === 'figurine') {
-      notice('6 suggested regions in one connected mesh. Select or hide them to inspect. Exports use the original assembled geometry.');
+      notice(`${parts.length - fragments} suggested figurine regions${fragmentsText}. Select or hide them to inspect. Exports use the assembled geometry.`);
     } else if (result.segmentation === 'too-large') {
-      notice(`One connected piece. Figurine analysis supports up to ${result.figurineTriangleLimit.toLocaleString()} triangles.`);
+      notice(`One main shell${fragmentsText}. Its ${triangleCount(parts[0]).toLocaleString()} triangles exceed the ${result.figurineTriangleLimit.toLocaleString()}-triangle limit for automatic figurine regions. Open a prepared PartLab GLB to see its named regions.`);
     } else if (result.segmentation === 'no-match') {
-      notice('One connected piece. PartLab found no clear figurine landmarks to suggest a split.');
+      notice(`One main shell${fragmentsText}. PartLab found no clear figurine landmarks for a split.`);
     } else {
       notice(`${parts.length.toLocaleString()} geometric parts found. Adjust spacing, select a part, or hide parts to look inside.`);
     }

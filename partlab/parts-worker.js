@@ -20,12 +20,22 @@ self.onmessage = ({ data }) => {
 
     let segmentation = 'shells';
     let discovered = parts;
-    if (data.infer && parts.length === 1) {
-      segmentation = triangles > figurineTriangleLimit ? 'too-large' : 'no-match';
-      const inferred = findFigurineParts(parts[0].positions);
-      if (inferred) {
-        segmentation = 'figurine';
-        discovered = inferred;
+    // Stray faces should not prevent discovery on a single dominant figurine shell.
+    // Keep distinct source bodies and substantial disconnected pieces intact.
+    const main = parts[0];
+    const mainTriangles = main?.positions.length / 9;
+    const dominant = parts.length === 1 ||
+      (data.sources.length === 1 && mainTriangles >= triangles * .98);
+    if (data.infer && main && dominant) {
+      if (mainTriangles > figurineTriangleLimit) {
+        segmentation = 'too-large';
+      } else {
+        segmentation = 'no-match';
+        const inferred = findFigurineParts(main.positions);
+        if (inferred && inferred.length + parts.length - 1 <= 2500) {
+          segmentation = 'figurine';
+          discovered = [...inferred, ...parts.slice(1)];
+        }
       }
     }
     self.postMessage({ parts: discovered, segmentation, figurineTriangleLimit }, discovered.map(part => part.positions.buffer));
