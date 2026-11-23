@@ -4,6 +4,7 @@ import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {ThreeMFLoader} from 'three/addons/loaders/3MFLoader.js';
 import {zipSync,strToU8} from 'fflate';
 import {bounds,binarySTL,objText,meshXML,stepText} from './geometry.js?v=0.1.2';
+import {readRegionGLB, trianglePositions} from './region-glb.js?v=0.2.1';
 
 const $=id=>document.getElementById(id);
 const palette=['#b5f4d5','#8dbbf8','#f3bb84','#c4a4ee','#f28fa0','#ebd882','#79ced4','#b5c5da'];
@@ -26,26 +27,57 @@ function notice(message,error=false){$('notice').textContent=message;$('notice')
 function setBusy(value,label='Working…'){busy=value;$('busy').hidden=!value;$('busy-text').textContent=label;$('file').disabled=value;$('demo').disabled=value;$('figurine').disabled=value;$('empty-demo').disabled=value;$('explode').disabled=value||!sources.length;$('export').disabled=value||!parts.length;$('assemble').disabled=value||!isDiscovered;$('spread').disabled=value||!isDiscovered||parts.length<2;}
 function workerJob(path,data,transfer=[]){return new Promise((resolve,reject)=>{const url=new URL(path,import.meta.url);const w=new Worker(url,{type:url.pathname.endsWith('/parts-worker.js')?'module':'classic'});activeWorker=w;workerReject=reject;const timer=setTimeout(()=>{w.terminate();activeWorker=null;workerReject=null;reject(new Error('Processing took too long. Try a smaller or simplified file.'));},120000);const end=()=>{clearTimeout(timer);w.terminate();activeWorker=null;workerReject=null;};w.onmessage=e=>{end();if(e.data.error)reject(new Error(e.data.error));else resolve(e.data);};w.onerror=e=>{end();reject(new Error(e.message||'The model processor could not load. Check your internet connection.'));};w.postMessage(data,transfer);});}
 
-const analyzeParts = infer => workerJob('parts-worker.js?v=0.2.0', { sources, infer });
+const analyzeParts = infer => workerJob('parts-worker.js?v=0.2.0', {
+  sources: sources.map(part => ({ name: part.name, positions: trianglePositions(part) })),
+  infer
+});
 
-function geometryFromPositions(positions){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(positions,3));g.computeVertexNormals();g.computeBoundingBox();return g;}
+const triangleCount = part => part.indices ? part.indices.length / 3 : part.positions.length / 9;
+
+function geometryFromPart(part) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
+  if (part.indices) geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
+  if (part.normals) geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
+  else geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  return geometry;
+}
 function clearParts(){for(const p of parts){model.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();}parts=[];}
 function displayParts(data,discovered=false){
   clearParts();isDiscovered=discovered;selected=-1;$('spread').value=0;$('spread-value').value='0%';
-  parts=data.map((p,i)=>{const geometry=geometryFromPositions(p.positions),material=new THREE.MeshStandardMaterial({color:discovered?palette[i%palette.length]:'#a1bbca',metalness:.22,roughness:.46,side:THREE.DoubleSide});const mesh=new THREE.Mesh(geometry,material);mesh.userData.partIndex=i;model.add(mesh);return{...p,mesh,color:palette[i%palette.length],center:geometry.boundingBox.getCenter(new THREE.Vector3()),direction:new THREE.Vector3()};});
+  parts = data.map((part, index) => {
+    const color = part.color ?? palette[index % palette.length];
+    const geometry = geometryFromPart(part);
+    const material = new THREE.MeshStandardMaterial({
+      color: discovered ? color : '#a1bbca', metalness: .22, roughness: .46, side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.partIndex = index;
+    model.add(mesh);
+    return { ...part, mesh, color, center: geometry.boundingBox.getCenter(new THREE.Vector3()), direction: new THREE.Vector3() };
+  });
   const box=new THREE.Box3().setFromObject(model);const center=box.getCenter(new THREE.Vector3());const dims=box.getSize(new THREE.Vector3());span=Math.max(...dims.toArray(),.001);zoomMin=span*.005;zoomMax=span*200;
   for(let i=0;i<parts.length;i++){if(parts[i].inferred&&parts[i].name==='Torso')continue;const d=parts[i].center.clone().sub(center);if(d.length()<span*.02){const angle=i*2.399963229728653;d.set(Math.cos(angle),Math.sin(angle),(i%3)-1).multiplyScalar(span*.3);}parts[i].direction.copy(d.normalize());}
   if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}grid=new THREE.GridHelper(span*3,24,0x425867,0x263541);grid.rotation.x=Math.PI/2;grid.position.set(center.x,center.y,box.min.z-span*.025);scene.add(grid);
   document.body.classList.add('has-model');target.copy(center);$('dimensions').textContent=dims.toArray().map(n=>n.toLocaleString(undefined,{maximumFractionDigits:1})).join(' × ');
-  $('triangles').textContent=parts.reduce((n,p)=>n+p.positions.length/9,0).toLocaleString();$('empty').hidden=true;$('file-card').hidden=false;$('filename').textContent=modelName;$('model-badge').textContent=parts.some(p=>p.inferred)?'SUGGESTED REGIONS':discovered?'PARTS DISCOVERED':'MODEL LOADED';renderPartList();fitView();
+  $('triangles').textContent=parts.reduce((n,p)=>n+triangleCount(p),0).toLocaleString();$('empty').hidden=true;$('file-card').hidden=false;$('filename').textContent=modelName;$('model-badge').textContent=parts[0]?.explosionOffset?'NAMED REGIONS':parts.some(p=>p.inferred)?'SUGGESTED REGIONS':discovered?'PARTS DISCOVERED':'MODEL LOADED';renderPartList();fitView();
 }
 
 function fitView(view){if(!parts.length){camera.lookAt(target);return;}const box=new THREE.Box3().setFromObject(model),center=box.getCenter(new THREE.Vector3()),radius=box.getSize(new THREE.Vector3()).length()/2;let dir=camera.position.clone().sub(target).normalize();if(view==='iso')dir.set(1,-1.35,.95).normalize();if(view==='front')dir.set(0,-1,0);if(view==='top')dir.set(0,-.00001,1).normalize();if(view==='right')dir.set(1,0,0);const fov=Math.min(camera.fov*Math.PI/180,2*Math.atan(Math.tan(camera.fov*Math.PI/360)*camera.aspect));const distance=radius/Math.sin(fov/2)*1.2;target.copy(center);camera.position.copy(center).addScaledVector(dir,Math.max(distance,.01));camera.near=Math.max(span/10000,.000001);camera.far=Math.max(distance*100,span*1000);camera.updateProjectionMatrix();camera.lookAt(target);}
-function spreadParts(){const amount=Number($('spread').value)/100;$('spread-value').value=Math.round(amount*100)+'%';for(const p of parts)p.mesh.position.copy(p.direction).multiplyScalar(span*.6*amount);if(grid)grid.position.z=new THREE.Box3().setFromObject(model).min.z-span*.025;}
+function spreadParts() {
+  const amount = Number($('spread').value) / 100;
+  $('spread-value').value = Math.round(amount * 100) + '%';
+  for (const part of parts) {
+    if (part.explosionOffset) part.mesh.position.fromArray(part.explosionOffset).multiplyScalar(amount);
+    else part.mesh.position.copy(part.direction).multiplyScalar(span * .6 * amount);
+  }
+  if (grid) grid.position.z = new THREE.Box3().setFromObject(model).min.z - span * .025;
+}
 function renderPartList(){
-  $('parts').replaceChildren();$('part-count').textContent=isDiscovered?parts.length:0;$('show-all').hidden=!isDiscovered;$('parts-hint').textContent=isDiscovered?'Click to select · Hide to inspect inside.':'Run discovery to identify geometric pieces.';
+  $('parts').replaceChildren();$('part-count').textContent=isDiscovered?parts.length:0;$('show-all').hidden=!isDiscovered;$('isolate-part').hidden=!isDiscovered;$('isolate-part').disabled=selected<0;$('parts-hint').textContent=isDiscovered?'Click to select · Hide to inspect inside.':'Run discovery to identify geometric pieces.';
   if(!isDiscovered){const div=document.createElement('div');div.className='parts-empty';div.textContent='Model ready. Discover its parts to begin exploring.';$('parts').append(div);return;}
-  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=(p.positions.length/9).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye);$('parts').append(card);});
+  parts.forEach((p,i)=>{const card=document.createElement('div');card.className='part'+(selected===i?' selected':'')+(!p.mesh.visible?' is-hidden':'');const swatch=document.createElement('span');swatch.className='part-color';swatch.style.background=p.color;const choose=document.createElement('button');choose.className='part-select';choose.title=p.name;choose.setAttribute('aria-pressed',String(selected===i));const name=document.createElement('strong');name.textContent=p.name||`Part ${i+1}`;const detail=document.createElement('small');detail.textContent=triangleCount(p).toLocaleString()+' triangles';choose.append(name,detail);choose.onclick=()=>selectPart(i);const eye=document.createElement('button');eye.className='visibility';eye.textContent=p.mesh.visible?'Hide':'Show';eye.setAttribute('aria-label',`${p.mesh.visible?'Hide':'Show'} ${p.name}`);eye.onclick=()=>{p.mesh.visible=!p.mesh.visible;renderPartList();};card.append(swatch,choose,eye);$('parts').append(card);});
 }
 function selectPart(i){selected=i;parts.forEach((p,k)=>{p.mesh.material.emissive.set(k===i?'#264d40':'#000000');p.mesh.material.emissiveIntensity=k===i?.8:0;});renderPartList();}
 
@@ -53,9 +85,19 @@ function extract(root){root.updateMatrixWorld(true);const out=[];let triangles=0
 function validate(data){if(!data.length)throw new Error('No triangle geometry was found in the file.');let n=0;for(const p of data){if(p.positions.length%9)throw new Error('Incomplete triangle geometry.');n+=p.positions.length/9;for(const v of p.positions)if(!Number.isFinite(v))throw new Error('Invalid model coordinates.');}if(n>1500000)throw new Error('Maximum 1.5 million triangles per model.');if(n===0)throw new Error('The model is empty.');}
 
 async function loadFile(file){
-  if(busy)return;const ext=file.name.split('.').pop().toLowerCase();if(!['stl','obj','3mf','step','stp'].includes(ext)){notice('Choose an STL, OBJ, 3MF, STEP, or STP file.',true);return;}if(file.size>80*1024*1024){notice('This prototype accepts files up to 80 MB.',true);return;}
+  if(busy)return;const ext=file.name.split('.').pop().toLowerCase();if(!['stl','obj','3mf','step','stp','glb'].includes(ext)){notice('Choose an STL, OBJ, 3MF, STEP, or PartLab region GLB file.',true);return;}if(file.size>80*1024*1024){notice('This prototype accepts files up to 80 MB.',true);return;}
   setBusy(true,ext==='step'||ext==='stp'?'Reading STEP bodies…':'Loading model…');
   try{const buffer=await file.arrayBuffer();let data;
+    if (ext === 'glb') {
+      data = readRegionGLB(buffer);
+      sources = data;
+      modelName = file.name;
+      displayParts(data, true);
+      $('file-kind').textContent = 'PARTLAB REGION GLB';
+      $('units-label').textContent = 'source dimensions';
+      showPreparedExplosion(true);
+      return;
+    }
     if(ext==='stl'){const g=new STLLoader().parse(buffer);const root=new THREE.Mesh(g);root.name='Mesh';data=extract(root);g.dispose();}
     else if(ext==='obj'){const root=new OBJLoader().parse(new TextDecoder().decode(buffer));data=extract(root);disposeImported(root);}
     else if(ext==='3mf'){// Check expanded package sizes before ThreeMFLoader decompresses the archive.
@@ -69,6 +111,12 @@ function checkZipSize(buffer){const dv=new DataView(buffer);let total=0,entries=
 
 async function discover() {
   if (busy || !sources.length) return;
+  if (sources[0].explosionOffset) {
+    parts.forEach(part => { part.mesh.visible = true; });
+    renderPartList();
+    showPreparedExplosion();
+    return;
+  }
   setBusy(true, 'Analyzing the model…');
   try {
     const result = await analyzeParts(true);
@@ -90,6 +138,13 @@ async function discover() {
   } finally {
     setBusy(false);
   }
+}
+
+function showPreparedExplosion(useFront = false) {
+  $('spread').value = 84;
+  spreadParts();
+  fitView(useFront ? 'front' : undefined);
+  notice(`${parts.length} named regions loaded. Adjust spacing or select and isolate a region. Cut edges are open for inspection.`);
 }
 
 function demo(){if(busy)return;const root=new THREE.Group();const add=(g,name,x,y,z)=>{const mesh=new THREE.Mesh(g);mesh.name=name;mesh.position.set(x,y,z);root.add(mesh);};
@@ -119,7 +174,7 @@ async function loadFigurine() {
 function exportParts() {
   // Suggested regions are open surface patches. Preserve the input mesh for export.
   const exportGeometry = parts.some(part => part.inferred) ? sources : parts;
-  return exportGeometry.map(({ name, positions }) => ({ name, positions }));
+  return exportGeometry.map(part => ({ name: part.name, positions: trianglePositions(part) }));
 }
 async function exportModel(){if(busy||!parts.length)return;setBusy(true,'Preparing download…');await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));try{const format=$('format').value,data=exportParts();let payload,type='application/octet-stream';if(format==='stl')payload=binarySTL(data);if(format==='obj'){payload=objText(data);type='text/plain';}if(format==='step'){// Split shells even if discovery has not been run.
       const { parts: shells } = await analyzeParts(false);payload=stepText(shells);type='application/step';
@@ -203,6 +258,10 @@ canvas.addEventListener('auxclick',e=>e.preventDefault());canvas.addEventListene
 new ResizeObserver(()=>{camera.aspect=Math.max(1,viewport.clientWidth)/Math.max(1,viewport.clientHeight);camera.updateProjectionMatrix();renderer.setSize(viewport.clientWidth,viewport.clientHeight);}).observe(viewport);
 renderer.setAnimationLoop(()=>{camera.lookAt(target);renderer.render(scene,camera);});
 $('file').addEventListener('change',e=>{if(e.target.files[0])loadFile(e.target.files[0]);});$('demo').onclick=demo;$('figurine').onclick=loadFigurine;$('empty-demo').onclick=loadFigurine;$('explode').onclick=discover;$('spread').oninput=spreadParts;$('assemble').onclick=()=>{$('spread').value=0;spreadParts();fitView();notice('Assembled view restored.');};$('fit').onclick=()=>fitView();$('show-all').onclick=()=>{parts.forEach(p=>p.mesh.visible=true);renderPartList();};$('export').onclick=exportModel;
+$('isolate-part').onclick = () => {
+  parts.forEach((part, index) => { part.mesh.visible = index === selected; });
+  renderPartList();
+};
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>fitView(b.dataset.view));
 window.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='f'&&!['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))fitView();});
 let dragDepth=0;window.addEventListener('dragenter',e=>{e.preventDefault();dragDepth++;document.body.classList.add('dragging');});window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('dragleave',e=>{if(--dragDepth<=0)document.body.classList.remove('dragging');});window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;document.body.classList.remove('dragging');if(e.dataTransfer.files.length!==1){notice('Please load one model at a time.',true);return;}loadFile(e.dataTransfer.files[0]);});

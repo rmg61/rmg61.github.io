@@ -11,8 +11,8 @@
   <main>
     <aside class="sidebar">
       <div class="eyebrow">MODEL WORKSPACE</div><h1>Take it apart.</h1><p class="intro">Explore a model in 3D. Discover its parts. See how they fit together.</p>
-      <label class="upload" id="drop-zone" for="file"><span class="upload-icon">↥</span><strong>Open a model</strong><span>or drop a file anywhere</span><small>STL · OBJ · 3MF · STEP / STP</small></label>
-      <input id="file" type="file" accept=".stl,.obj,.3mf,.step,.stp" hidden>
+      <label class="upload" id="drop-zone" for="file"><span class="upload-icon">↥</span><strong>Open a model</strong><span>or drop a file anywhere</span><small>STL · OBJ · 3MF · STEP · PartLab GLB</small></label>
+      <input id="file" type="file" accept=".stl,.obj,.3mf,.step,.stp,.glb" hidden>
       <div><button class="text-button" id="figurine">Try the astronaut figurine</button> <span aria-hidden="true">·</span> <button class="text-button" id="demo">Try the pump</button></div>
       <section class="file-card" id="file-card" hidden><div class="eyebrow" id="file-kind">CURRENT MODEL</div><strong id="filename"></strong><div class="stats"><div><b id="triangles">—</b><span>triangles</span></div><div><b id="dimensions">—</b><span id="units-label">dimensions · mm assumed</span></div></div></section>
       <section class="action-card"><h2>Discover the parts</h2><p>Separate existing pieces or preview suggested regions on a one-piece figurine.</p><button id="explode" class="primary" disabled>✧ &nbsp; Explode into parts</button><label class="slider-label" for="spread">Part spacing <output id="spread-value">0%</output></label><input id="spread" type="range" min="0" max="180" value="0" disabled><button id="assemble" class="secondary" disabled>↩ &nbsp; Reassemble</button></section>
@@ -23,11 +23,11 @@
       <div class="workspace-top"><div><span class="eyebrow">3D VIEWPORT</span><span id="model-badge" class="badge">READY FOR A MODEL</span></div><div class="export-group"><select id="format" aria-label="Export format"><option value="stl">STL</option><option value="obj">OBJ</option><option value="3mf">3MF</option><option value="step">STEP · faceted</option></select><button id="export" class="secondary" disabled>Export ↓</button></div></div>
       <div id="viewport"><div class="empty" id="empty"><div class="empty-symbol">◈</div><h2>Open a 3D model</h2><p>Drop a file here or try the one-piece sample.</p><button id="empty-demo" class="primary">Explore the astronaut</button></div><div class="view-label">PERSPECTIVE <span> / </span> Z UP</div><div class="orientation"><button data-view="iso" title="Isometric view">ISO</button><button data-view="front">FRONT</button><button data-view="top">TOP</button><button data-view="right">RIGHT</button></div><button id="fit" class="fit" title="Fit model (F)">⌖ &nbsp; Fit view</button><div class="busy" id="busy" hidden><span class="spinner"></span><span id="busy-text">Loading model…</span></div></div>
       <div class="notice" id="notice" role="status" aria-live="polite">Open a model to begin. Maximum file size: 80 MB.</div>
-      <section class="parts-panel"><div class="parts-heading"><h2>Parts <span id="part-count">0</span></h2><span id="parts-hint">Run discovery to identify geometric pieces.</span><button id="show-all" class="text-button" hidden>Show all</button></div><div id="parts" class="parts"><div class="parts-empty">Your model’s parts will appear here.</div></div></section>
+      <section class="parts-panel"><div class="parts-heading"><h2>Parts <span id="part-count">0</span></h2><span id="parts-hint">Run discovery to identify geometric pieces.</span><button id="show-all" class="text-button" hidden>Show all</button><button id="isolate-part" class="text-button" hidden>Isolate selected</button></div><div id="parts" class="parts"><div class="parts-empty">Your model’s parts will appear here.</div></div></section>
       <footer><span><kbd>Left or right drag</kbd> Orbit &nbsp; <kbd>Middle drag</kbd> Pan &nbsp; <kbd>Shift + middle drag</kbd> Orbit &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>F</kbd> Fit</span><span>Left click to select a part</span></footer>
     </section>
   </main>
   <noscript>This app requires JavaScript and WebGL.</noscript>
-  <script type="module" src="./app.js?v=0.2.0"></script>
+  <script type="module" src="./app.js?v=0.2.1"></script>
   <script>window.addEventListener('error',e=>{if(e.message?.includes('module')||e.target?.tagName==='SCRIPT'){document.getElementById('notice').textContent='A dependency could not load. Check your internet connection and reload.'}},true);setTimeout(()=>{if(!window.partlabReady)document.getElementById('notice').textContent='The 3D viewer could not start. Check your internet connection and WebGL support, then reload.'},20000)</script>
 </body></html>
